@@ -1,0 +1,47 @@
+name: Deploy configurator to GitHub Pages
+
+on:
+  push:
+    branches: [main] # publish what lands on main
+  workflow_dispatch: # manual redeploy
+
+permissions:
+  contents: read # checkout
+  pages: write # publish the site
+  id-token: write # Pages deployment token
+
+concurrency:
+  group: pages # one deployment at a time
+  cancel-in-progress: false # let a running deployment finish
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04 # pinned runner image
+    defaults:
+      run:
+        working-directory: configurator # the site's package
+    steps:
+      - uses: actions/checkout@v7 # repository, including the shared ck108/ layout table
+      - uses: actions/setup-node@v7 # Node toolchain
+        with:
+          node-version: 24 # Node LTS
+          cache: npm # reuse downloaded packages
+          cache-dependency-path: configurator/package-lock.json # the site's lockfile
+      - run: npm ci # exact dependencies from the lockfile
+      - run: npm run check # type errors stop the deploy
+      - run: npm run build # static site in build/
+        env:
+          BASE_PATH: /${{ github.event.repository.name }} # Pages serves a project site under /<repo>/
+      - uses: actions/upload-pages-artifact@v5 # hand the site to the deploy job
+        with:
+          path: configurator/build # built site
+
+  deploy:
+    needs: build # only a site that built and type-checked
+    runs-on: ubuntu-24.04 # pinned runner image
+    environment:
+      name: github-pages # Pages deployment environment
+      url: ${{ steps.deployment.outputs.page_url }} # site link on the run page
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5 # publish the uploaded site

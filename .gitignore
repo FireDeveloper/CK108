@@ -1,0 +1,4 @@
+#? The vendor installer is MotoSpeed's software and is not redistributed here.
+Motospeed.exe
+__pycache__/
+*.pyc

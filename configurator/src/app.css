@@ -1,0 +1,70 @@
+/* Design tokens: components read only these, so a theme change touches this file alone. */
+:root {
+	color-scheme: light dark;
+
+	--font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+	--font-mono: ui-monospace, 'Cascadia Code', 'SF Mono', Consolas, monospace;
+
+	--radius: 10px;
+	--radius-small: 6px;
+	--space: 16px;
+
+	--bg: #f4f5f7;
+	--surface: #ffffff;
+	--surface-raised: #eef0f3;
+	--border: #dde1e7;
+	--text: #1b1f26;
+	--text-muted: #5d6673;
+	--accent: #4f46e5;
+	--accent-hover: #4338ca;
+	--accent-text: #ffffff;
+	--accent-soft: #dfe3ff;
+	--ok: #15803d;
+	--ok-soft: #dcfce7;
+	--warn: #b45309;
+	--warn-soft: #fef3c7;
+	--danger: #b91c1c;
+	--danger-soft: #fee2e2;
+	--neutral-soft: #e5e7eb;
+	--info-soft: #eef0ff;
+	--focus: #818cf8;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #0f1115;
+		--surface: #171a21;
+		--surface-raised: #1f232c;
+		--border: #2a2f3a;
+		--text: #e6e8ec;
+		--text-muted: #9aa3b2;
+		--accent: #818cf8;
+		--accent-hover: #a5b4fc;
+		--accent-text: #0f1115;
+		--accent-soft: #2b2f66;
+		--ok: #4ade80;
+		--ok-soft: #12321f;
+		--warn: #fbbf24;
+		--warn-soft: #3a2c0b;
+		--danger: #f87171;
+		--danger-soft: #3b1414;
+		--neutral-soft: #262b35;
+		--info-soft: #1d2040;
+		--focus: #a5b4fc;
+	}
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--text);
+	font-family: var(--font-sans);
+	font-size: 15px;
+	line-height: 1.5;
+}
