@@ -1,20 +1,22 @@
 <script lang="ts">
 	/**
 	 * @file Button.svelte
-	 * @brief Shared button in primary, secondary and ghost variants; extra attributes pass through to the element.
+	 * @brief Shared button in primary, secondary, ghost and danger variants and two sizes; extra attributes pass through to the element.
+	 * @note An icon-only button has no visible text, so its type requires an aria-label.
 	 */
 	import type { Snippet } from 'svelte';
 	import type { HTMLButtonAttributes } from 'svelte/elements';
 
-	interface Props extends HTMLButtonAttributes {
-		variant?: 'primary' | 'secondary' | 'ghost';
+	type Props = HTMLButtonAttributes & {
+		variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
+		size?: 'sm' | 'md';
 		children: Snippet;
-	}
+	} & ({ iconOnly: true; 'aria-label': string } | { iconOnly?: false });
 
-	let { variant = 'secondary', type = 'button', children, ...rest }: Props = $props(); // variant and pass-through attributes
+	let { variant = 'secondary', size = 'md', iconOnly = false, type = 'button', children, ...rest }: Props = $props(); // look, size, pass-through attributes
 </script>
 
-<button {type} class={['button', variant]} {...rest}>
+<button {type} class={['button', variant, size, { 'icon-only': iconOnly }]} {...rest}>
 	{@render children()}
 </button>
 
@@ -22,27 +24,59 @@
 	.button {
 		display: inline-flex;
 		align-items: center;
-		gap: 8px;
-		padding: 8px 14px;
+		justify-content: center;
+		gap: var(--space-2);
+		height: var(--control-md);
+		padding: 0 14px;
 		border: 1px solid transparent;
-		border-radius: var(--radius-small);
+		border-radius: var(--radius-sm);
 		font: inherit;
-		font-weight: 600;
+		font-size: var(--text-base);
+		font-weight: var(--weight-medium);
+		line-height: 1;
+		white-space: nowrap;
 		cursor: pointer;
 		user-select: none;
 		transition:
-			background-color 120ms,
-			border-color 120ms,
-			color 120ms;
+			background-color var(--duration-fast) var(--ease-standard),
+			border-color var(--duration-fast) var(--ease-standard),
+			color var(--duration-fast) var(--ease-standard),
+			translate var(--duration-fast) var(--ease-standard);
 	}
 
-	.button:focus-visible {
-		outline: 2px solid var(--focus);
-		outline-offset: 2px;
+	.button :global(svg) {
+		flex: none;
+		width: 16px;
+		height: 16px;
+	}
+
+	.sm {
+		gap: 6px;
+		height: var(--control-sm);
+		padding: 0 10px;
+		font-size: var(--text-sm);
+	}
+
+	.sm :global(svg) {
+		width: 14px;
+		height: 14px;
+	}
+
+	.icon-only {
+		width: var(--control-md);
+		padding: 0;
+	}
+
+	.icon-only.sm {
+		width: var(--control-sm);
+	}
+
+	.button:active:not(:disabled) {
+		translate: 0 1px;
 	}
 
 	.button:disabled {
-		opacity: 0.5;
+		opacity: var(--disabled-opacity);
 		cursor: not-allowed;
 	}
 
@@ -57,12 +91,13 @@
 
 	.secondary {
 		background: var(--surface-raised);
-		border-color: var(--border);
+		border-color: var(--border-strong);
 		color: var(--text);
+		box-shadow: var(--shadow-xs);
 	}
 
 	.secondary:hover:not(:disabled) {
-		border-color: var(--text-muted);
+		background: var(--surface-raised-hover);
 	}
 
 	.ghost {
@@ -71,7 +106,16 @@
 	}
 
 	.ghost:hover:not(:disabled) {
+		background: var(--fill-hover);
 		color: var(--text);
-		background: var(--surface-raised);
+	}
+
+	.danger {
+		background: var(--danger-solid);
+		color: var(--on-danger);
+	}
+
+	.danger:hover:not(:disabled) {
+		background: var(--danger-solid-hover);
 	}
 </style>

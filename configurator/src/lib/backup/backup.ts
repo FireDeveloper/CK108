@@ -6,20 +6,20 @@
 
 import { KEYMAP_SIZE, PROFILES } from '#lib/ck108/keymap.ts';
 import { CYCLES_MAX, DELAY_MAX_MS, MACRO_LIMIT, STEP_LIMIT, type Macro, type MacroStep, type StepTarget } from '#lib/ck108/macros.ts';
-import { KEY_COLORS_SIZE, LIGHTING_SIZE } from '#lib/ck108/protocol.ts';
+import { KEY_COLORS_SIZE, LIGHTING_RECORD_SIZE } from '#lib/ck108/protocol.ts';
 
 //& Public Variables
 
 export const BACKUP_FORMAT = 'ck108-backup'; // format tag in every file
 export const BACKUP_VERSION = 1; // layout version this code writes and reads
 
-/** @brief Every setting read from one keyboard. */
+/** @brief Every setting read from one keyboard; lighting, keyColors and keymaps hold one block per profile, in profile order. */
 export interface Backup {
 	savedAt: string;
 	firmware: number;
 	activeProfile: number;
-	lighting: Uint8Array;
-	keyColors: Uint8Array;
+	lighting: Uint8Array[];
+	keyColors: Uint8Array[];
 	keymaps: Uint8Array[];
 	macros: Macro[];
 }
@@ -42,8 +42,8 @@ export function serializeBackup(backup: Backup): string {
 			savedAt: backup.savedAt, // ISO time of the read
 			firmware: backup.firmware, // firmware version of the source keyboard
 			activeProfile: backup.activeProfile, // 0-based, index into keymaps
-			lighting: toHex(backup.lighting), // whole lighting block
-			keyColors: toHex(backup.keyColors), // per-key colours, R G B per LED
+			lighting: backup.lighting.map(toHex), // one lighting record per profile
+			keyColors: backup.keyColors.map(toHex), // per-key colours per profile, R G B per LED
 			keymaps: backup.keymaps.map(toHex), // one key map per profile
 			macros: backup.macros // readable macros
 		},
@@ -71,17 +71,15 @@ export function parseBackup(text: string): Backup {
 	if (root.version !== BACKUP_VERSION) throw new BackupError(`The backup has version ${String(root.version)}; this page reads version ${BACKUP_VERSION}.`); // other layout
 
 	//- Fields
-	const keymaps = list(root.keymaps, 'keymaps'); // per-profile hex strings
-	if (keymaps.length !== PROFILES) throw new BackupError(`keymaps must hold ${PROFILES} profiles, not ${keymaps.length}.`); // wrong profile count
 	const macros = list(root.macros, 'macros'); // macro objects
 	if (macros.length > MACRO_LIMIT) throw new BackupError(`macros holds ${macros.length} macros; at most ${MACRO_LIMIT} fit.`); // too many macros
 	return {
 		savedAt: typeof root.savedAt === 'string' ? root.savedAt : '', // informational only
 		firmware: integer(root.firmware, 'firmware', 0, 0xffff), // source firmware
 		activeProfile: integer(root.activeProfile, 'activeProfile', 0, PROFILES - 1), // informational only
-		lighting: fromHex(root.lighting, LIGHTING_SIZE, 'lighting'), // whole lighting block
-		keyColors: fromHex(root.keyColors, KEY_COLORS_SIZE, 'keyColors'), // per-key colours
-		keymaps: keymaps.map((map, profile) => fromHex(map, KEYMAP_SIZE, `keymaps[${profile}]`)), // key maps
+		lighting: perProfile(root.lighting, LIGHTING_RECORD_SIZE, 'lighting'), // lighting records
+		keyColors: perProfile(root.keyColors, KEY_COLORS_SIZE, 'keyColors'), // per-key colours
+		keymaps: perProfile(root.keymaps, KEYMAP_SIZE, 'keymaps'), // key maps
 		macros: macros.map((macro, index) => parseMacro(macro, `macros[${index}]`)) // checked macros
 	};
 }
@@ -97,6 +95,20 @@ export function backupFileName(date: Date): string {
 }
 
 //& Private Functions
+
+/**
+ * @brief Check and convert one hex block per profile.
+ * @param[in] value Parsed JSON value.
+ * @param[in] size Byte length of each block.
+ * @param[in] path Field path for error messages.
+ * @return One block per profile, in profile order.
+ * @throws BackupError value is not a list of PROFILES hex strings of the right length.
+ */
+function perProfile(value: unknown, size: number, path: string): Uint8Array<ArrayBuffer>[] {
+	const blocks = list(value, path); // per-profile hex strings
+	if (blocks.length !== PROFILES) throw new BackupError(`${path} must hold ${PROFILES} profiles, not ${blocks.length}.`); // wrong profile count
+	return blocks.map((block, profile) => fromHex(block, size, `${path}[${profile}]`)); // checked blocks
+}
 
 /**
  * @brief Check and convert one macro object.

@@ -10,9 +10,10 @@ import {
 	INFO_PROFILE,
 	INFO_SIZE,
 	KEY_COLORS_SIZE,
+	KEY_COLORS_STRIDE,
 	LEDS_PER_CHUNK,
 	LED_SLOTS,
-	LIGHTING_SIZE,
+	LIGHTING_RECORD_SIZE,
 	PRODUCT_ID,
 	REPORT_ID,
 	SESSION_END_DELAY_MS,
@@ -120,7 +121,7 @@ export class Keyboard {
 	 * @param[in] profile 0..PROFILES-1.
 	 * @throws RangeError profile is out of range.
 	 * @throws Ck108Error The keyboard rejected a command or did not reply.
-	 * @note Lighting and per-key colours are shared by every profile; only the key map in use changes.
+	 * @note Every profile has its own key map, lighting record and per-key colours; the keyboard shows the new profile's at once.
 	 */
 	setProfile(profile: number): Promise<void> {
 		checkProfile(profile); // valid slot only
@@ -132,47 +133,67 @@ export class Keyboard {
 	}
 
 	/**
-	 * @brief Read the lighting block.
+	 * @brief Read one profile's lighting settings.
+	 * @param[in] profile 0..PROFILES-1.
 	 * @return Mode, levels, direction, rainbow flag and effect colour.
+	 * @throws RangeError profile is out of range.
 	 * @throws Ck108Error The keyboard rejected a command or did not reply.
 	 */
-	async readLighting(): Promise<Lighting> {
-		return decodeLighting(await this.readLightingBlock()); // fields the configurator shows
+	async readLighting(profile: number): Promise<Lighting> {
+		return decodeLighting(await this.readLightingBlock(profile)); // fields the configurator shows
 	}
 
 	/**
-	 * @brief Read the whole lighting block as stored.
-	 * @return LIGHTING_SIZE bytes; LightingOffset names the known fields.
+	 * @brief Read one profile's whole lighting record as stored.
+	 * @param[in] profile 0..PROFILES-1.
+	 * @return LIGHTING_RECORD_SIZE bytes; LightingOffset names the known fields.
+	 * @throws RangeError profile is out of range.
 	 * @throws Ck108Error The keyboard rejected a command or did not reply.
 	 */
-	readLightingBlock(): Promise<Uint8Array> {
-		return this.#exclusive(() => this.#session(async () => (await this.#transfer(Command.readLighting, LIGHTING_SIZE)).slice(0, LIGHTING_SIZE))); // block read inside a session
+	readLightingBlock(profile: number): Promise<Uint8Array> {
+		checkProfile(profile); // valid slot only
+		return this.#exclusive(() => this.#session(() => this.#readBlock(Command.readLighting, profile * LIGHTING_RECORD_SIZE, LIGHTING_RECORD_SIZE))); // profile's record
 	}
 
 	/**
-	 * @brief Write lighting fields in one session; the keyboard applies them on Command.end.
-	 * @param[in] fields Field writes in send order, from byteField() or colorFields().
+	 * @brief Write lighting fields of one profile in one session; the keyboard applies them on Command.end.
+	 * @param[in] profile 0..PROFILES-1.
+	 * @param[in] fields Field writes in send order, offsets within the record, from byteField() or colorFields().
+	 * @throws RangeError profile is out of range, or a field runs past the record.
 	 * @throws Ck108Error The keyboard rejected a command or did not reply.
 	 */
-	writeLighting(fields: readonly LightingField[]): Promise<void> {
+	writeLighting(profile: number, fields: readonly LightingField[]): Promise<void> {
+		//- Input validation
+		checkProfile(profile); // valid slot only
+		for (const [offset, data] of fields) {
+			//! Past the last record the same command reaches the key map store, so a field must stay inside its own record.
+			if (offset < 0 || offset + data.length > LIGHTING_RECORD_SIZE) throw new RangeError(`lighting field ${offset}+${data.length} runs past the record`); // reject
+		}
+
+		//- One packet per field, as the vendor app sends them
+		const base = profile * LIGHTING_RECORD_SIZE; // profile's record in the lighting store
 		return this.#exclusive(() =>
 			this.#session(async () => {
-				for (const [offset, data] of fields) await this.#transfer(Command.writeLighting, data.length, offset, data); // one packet per field, as the vendor app sends them
+				for (const [offset, data] of fields) await this.#transfer(Command.writeLighting, data.length, base + offset, data); // field update
 			})
 		);
 	}
 
 	/**
-	 * @brief Read the per-key colour buffer shown by the custom effect.
+	 * @brief Read one profile's per-key colour buffer, shown by the custom effect.
+	 * @param[in] profile 0..PROFILES-1.
 	 * @return KEY_COLORS_SIZE bytes, R G B per LED index.
+	 * @throws RangeError profile is out of range.
 	 * @throws Ck108Error The keyboard rejected a command or did not reply.
 	 */
-	readKeyColors(): Promise<Uint8Array> {
+	readKeyColors(profile: number): Promise<Uint8Array> {
+		checkProfile(profile); // valid slot only
+		const base = profile * KEY_COLORS_STRIDE; // profile's buffer in the colour store
 		return this.#exclusive(() =>
 			this.#session(async () => {
 				const colors = new Uint8Array(KEY_COLORS_SIZE); // whole buffer
 				for (let led = 0; led < LED_SLOTS; led += LEDS_PER_CHUNK) { // one packet per chunk
-					const chunk = await this.#transfer(Command.readKeyColors, LEDS_PER_CHUNK * 3, led * 3); // chunk colours
+					const chunk = await this.#transfer(Command.readKeyColors, LEDS_PER_CHUNK * 3, base + led * 3); // chunk colours
 					colors.set(chunk.subarray(0, LEDS_PER_CHUNK * 3), led * 3); // place them
 				}
 				return colors; // full buffer
@@ -181,19 +202,22 @@ export class Keyboard {
 	}
 
 	/**
-	 * @brief Write the per-key colour buffer shown by the custom effect.
+	 * @brief Write one profile's per-key colour buffer, shown by the custom effect.
+	 * @param[in] profile 0..PROFILES-1.
 	 * @param[in] colors KEY_COLORS_SIZE bytes, R G B per LED index.
-	 * @throws RangeError colors has the wrong length.
+	 * @throws RangeError profile is out of range or colors has the wrong length.
 	 * @throws Ck108Error The keyboard rejected a command or did not reply.
 	 */
-	writeKeyColors(colors: Uint8Array): Promise<void> {
+	writeKeyColors(profile: number, colors: Uint8Array): Promise<void> {
+		checkProfile(profile); // valid slot only
 		if (colors.length !== KEY_COLORS_SIZE) throw new RangeError(`need ${KEY_COLORS_SIZE} colour bytes, got ${colors.length}`); // full buffer only
 		const copy = colors.slice(); // later edits by the caller do not leak into queued packets
+		const base = profile * KEY_COLORS_STRIDE; // profile's buffer in the colour store
 		return this.#exclusive(() =>
 			this.#session(async () => {
 				for (let led = 0; led < LED_SLOTS; led += LEDS_PER_CHUNK) { // one packet per chunk
 					const size = LEDS_PER_CHUNK * 3; // bytes per packet
-					await this.#transfer(Command.writeKeyColors, size, led * 3, copy.slice(led * 3, led * 3 + size)); // chunk colours
+					await this.#transfer(Command.writeKeyColors, size, base + led * 3, copy.slice(led * 3, led * 3 + size)); // chunk colours
 				}
 			})
 		);

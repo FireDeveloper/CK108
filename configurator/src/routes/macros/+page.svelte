@@ -5,14 +5,11 @@
 	 * @note Rendered only while connected; the root layout shows the connect screen otherwise.
 	 */
 	import { getConnection } from '#lib/ck108/connection.svelte.ts';
+	import ReadingState from '#lib/device/ReadingState.svelte';
 	import MacroEditor from '#lib/macros/MacroEditor.svelte';
 
 	const connection = getConnection(); // shared connection from the layout
 </script>
-
-<svelte:head>
-	<title>Macros - CK108 Configurator</title>
-</svelte:head>
 
 {#if connection.info && connection.keymaps && connection.defaultKeymap && connection.macros}
 	<MacroEditor
@@ -24,12 +21,5 @@
 		hasNames={connection.hasMacroNames}
 	/>
 {:else}
-	<p>Reading...</p>
+	<ReadingState />
 {/if}
-
-<style>
-	p {
-		margin: 0;
-		color: var(--text-muted);
-	}
-</style>

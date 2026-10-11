@@ -5,24 +5,14 @@
 	 * @note Rendered only while connected; the root layout shows the connect screen otherwise.
 	 */
 	import { getConnection } from '#lib/ck108/connection.svelte.ts';
+	import ReadingState from '#lib/device/ReadingState.svelte';
 	import BackupPanel from '#lib/backup/BackupPanel.svelte';
 
 	const connection = getConnection(); // shared connection from the layout
 </script>
 
-<svelte:head>
-	<title>Backup - CK108 Configurator</title>
-</svelte:head>
-
 {#if connection.info && connection.defaultKeymap}
 	<BackupPanel firmware={connection.info.firmware} defaults={connection.defaultKeymap} />
 {:else}
-	<p>Reading...</p>
+	<ReadingState />
 {/if}
-
-<style>
-	p {
-		margin: 0;
-		color: var(--text-muted);
-	}
-</style>

@@ -13,7 +13,12 @@
 	import Button from '#lib/ui/Button.svelte';
 	import Card from '#lib/ui/Card.svelte';
 	import Checkbox from '#lib/ui/Checkbox.svelte';
+	import ConfirmDialog from '#lib/ui/ConfirmDialog.svelte';
+	import FieldGroup from '#lib/ui/FieldGroup.svelte';
 	import FileButton from '#lib/ui/FileButton.svelte';
+	import Hint from '#lib/ui/Hint.svelte';
+	import KeyValueList from '#lib/ui/KeyValueList.svelte';
+	import Spinner from '#lib/ui/Spinner.svelte';
 	import { BackupError, backupFileName, parseBackup, serializeBackup, type Backup } from './backup.ts';
 
 	interface Props {
@@ -88,7 +93,7 @@
 		}
 	}
 
-	/** @brief Write the chosen parts of the loaded backup. */
+	/** @brief Write the chosen parts of the loaded backup; called once the user confirms. */
 	async function restore(): Promise<void> {
 		if (!loaded) return; // nothing loaded
 		confirming = false; // confirmation used
@@ -107,158 +112,130 @@
 	 * @return Display lines for each part.
 	 */
 	function summarize(backup: Backup) {
-		const mode = backup.lighting[0]; // effect mode byte
-		const litKeys = KEYS.filter((key) => backup.keyColors.subarray(key.led * 3, key.led * 3 + 3).some((channel) => channel !== 0)).length; // keys with a colour
 		const remapped = Array.from({ length: PROFILES }, (_, profile) => KEYS.filter((key) => !sameEntry(backup.keymaps[profile], defaults, key.slot)).length); // changed keys per profile
 		return {
 			saved: backup.savedAt ? new Date(backup.savedAt).toLocaleString() : 'unknown time', // when it was read
 			isOtherFirmware: backup.firmware !== firmware, // saved from different firmware
 			firmware: `0x${hex16(backup.firmware)}`, // source firmware
-			lighting: `${MODES[mode] ?? `Mode ${mode}`}, brightness ${backup.lighting[1]}`, // effect and brightness
-			keyColors: `${litKeys} of ${KEYS.length} keys lit`, // custom effect colours
+			lighting: perProfile(backup.lighting, (record) => `${MODES[record[0]] ?? `Mode ${record[0]}`}, brightness ${record[1]}`), // effect and brightness
+			keyColors: perProfile(backup.keyColors, (colors) => `${litKeys(colors)} of ${KEYS.length} keys lit`), // custom effect colours
 			keys: remapped.map((count, profile) => `profile ${profile + 1}: ${count === 0 ? 'factory' : `${count} changed`}`).join(', '), // remaps per profile
 			macros: backup.macros.length === 0 ? 'none' : backup.macros.map((macro) => macro.name).join(', ') // macro names
 		};
 	}
+
+	/**
+	 * @brief Describe one part of a backup profile by profile, for the preview.
+	 * @param[in] blocks One block per profile.
+	 * @param[in] describe Text for one profile's block.
+	 * @return "Profile 1: ...; profile 2: ...".
+	 */
+	function perProfile(blocks: readonly Uint8Array[], describe: (block: Uint8Array) => string): string {
+		const parts = blocks.map((block, profile) => `${profile === 0 ? 'Profile' : 'profile'} ${profile + 1}: ${describe(block)}`); // one phrase per profile
+		return parts.join('; '); // one sentence
+	}
+
+	/**
+	 * @brief Count the drawn keys that have a colour in a per-key buffer.
+	 * @param[in] colors KEY_COLORS_SIZE bytes, R G B per LED.
+	 * @return Keys whose colour is not black.
+	 */
+	function litKeys(colors: Uint8Array): number {
+		return KEYS.filter((key) => colors.subarray(key.led * 3, key.led * 3 + 3).some((channel) => channel !== 0)).length; // keys with a colour
+	}
 </script>
 
-<Card title="Save a backup">
-	<p>Reads every setting from the keyboard and saves it as a file: lighting, key colours, the keys of all three profiles, and the macros.</p>
-	<div class="actions">
-		<Button variant="primary" disabled={saving} onclick={save}>
-			<Download size={16} aria-hidden="true" />
-			{saving ? 'Reading...' : 'Save backup file'}
-		</Button>
-	</div>
-	{#if savedName}
-		<p class="hint">Saved as {savedName} in your downloads.</p>
-	{/if}
-</Card>
+{#snippet restoreFooter()}
+	<Button variant="primary" disabled={!hasParts || restoring} onclick={() => (confirming = true)}>
+		{#if restoring}<Spinner />{:else}<Upload aria-hidden="true" />{/if}
+		{restoring ? 'Restoring...' : 'Restore to keyboard'}
+	</Button>
+{/snippet}
 
-<Card title="Restore from a backup">
-	<p>Choose a backup file to see what it holds before anything is written.</p>
-	<div class="actions">
-		<FileButton accept=".json,application/json" disabled={restoring} onfile={load}>
-			<FileUp size={16} aria-hidden="true" />
-			Choose backup file
-		</FileButton>
-	</div>
-
-	{#if loadError}
-		<Alert tone="danger" title="This file cannot be restored">{loadError}</Alert>
-	{/if}
-
-	{#if loaded && summary}
-		<dl>
-			<dt>File</dt>
-			<dd>{loaded.fileName}</dd>
-			<dt>Saved</dt>
-			<dd>{summary.saved}, firmware {summary.firmware}</dd>
-		</dl>
-
-		{#if summary.isOtherFirmware}
-			<Alert tone="warn" title="Saved from different firmware">
-				This keyboard runs firmware 0x{hex16(firmware)}. The settings may not mean the same thing on it.
-			</Alert>
+<div class="backup">
+	<Card title="Save a backup" description="Reads every setting from the keyboard and saves it as a file.">
+		<KeyValueList
+			items={[
+				{ term: 'Lighting', detail: 'Effect, brightness, speed, direction and colours of every profile' },
+				{ term: 'Key colours', detail: 'The colour of every key for Custom backlit mode, in every profile' },
+				{ term: 'Keys', detail: 'The key map of every profile' },
+				{ term: 'Macros', detail: 'Every stored macro with its steps' }
+			]}
+		/>
+		{#if savedName}
+			<Alert tone="ok" title="Backup saved">Saved as {savedName} in your downloads.</Alert>
 		{/if}
 
-		<fieldset>
-			<legend>Restore</legend>
-			<div class="part">
-				<Checkbox label="Lighting" checked={restoreLighting} onchange={(on) => (restoreLighting = on)} />
-				<span class="detail">{summary.lighting}</span>
-			</div>
-			<div class="part">
-				<Checkbox label="Key colours" checked={restoreKeyColors} onchange={(on) => (restoreKeyColors = on)} />
-				<span class="detail">{summary.keyColors}</span>
-			</div>
-			<div class="part">
-				<Checkbox label="Keys and macros" checked={restoreKeys} onchange={(on) => (restoreKeys = on)} />
-				<span class="detail">Keys of {summary.keys}. Macros: {summary.macros}.</span>
-			</div>
-		</fieldset>
-		<p class="hint">
-			Keys and macros go together because keys refer to macros by number. Restoring replaces those settings on the keyboard; save a backup
-			first if you may want them back. The keyboard stays on the profile it is using.
-		</p>
+		{#snippet footer()}
+			<Button variant="primary" disabled={saving} onclick={save}>
+				{#if saving}<Spinner />{:else}<Download aria-hidden="true" />{/if}
+				{saving ? 'Reading...' : 'Save backup file'}
+			</Button>
+		{/snippet}
+	</Card>
 
-		<div class="actions">
-			{#if confirming}
-				<span class="detail">Replace the chosen settings on the keyboard?</span>
-				<Button variant="primary" onclick={restore}>
-					<Upload size={16} aria-hidden="true" />
-					Restore
-				</Button>
-				<Button onclick={() => (confirming = false)}>Cancel</Button>
-			{:else}
-				<Button variant="primary" disabled={!hasParts || restoring} onclick={() => (confirming = true)}>
-					<Upload size={16} aria-hidden="true" />
-					{restoring ? 'Restoring...' : 'Restore to keyboard'}
-				</Button>
-			{/if}
+	<Card title="Restore from a backup" description="Choose a backup file to see what it holds before anything is written." footer={loaded ? restoreFooter : undefined}>
+		<div>
+			<FileButton accept=".json,application/json" disabled={restoring} onfile={load}>
+				<FileUp aria-hidden="true" />
+				Choose backup file
+			</FileButton>
 		</div>
-	{/if}
 
-	{#if restoredName}
-		<p class="hint">Restored from {restoredName} and read back from the keyboard.</p>
-	{/if}
-</Card>
+		{#if loadError}
+			<Alert tone="danger" title="This file cannot be restored">{loadError}</Alert>
+		{/if}
+
+		{#if loaded && summary}
+			<KeyValueList
+				items={[
+					{ term: 'File', detail: loaded.fileName },
+					{ term: 'Saved', detail: summary.saved },
+					{ term: 'Firmware', detail: summary.firmware, mono: true }
+				]}
+			/>
+
+			{#if summary.isOtherFirmware}
+				<Alert tone="warn" title="Saved from different firmware">
+					This keyboard runs firmware 0x{hex16(firmware)}. The settings may not mean the same thing on it.
+				</Alert>
+			{/if}
+
+			<FieldGroup label="Restore">
+				<Checkbox label="Lighting" description={summary.lighting} checked={restoreLighting} onchange={(on) => (restoreLighting = on)} />
+				<Checkbox label="Key colours" description={summary.keyColors} checked={restoreKeyColors} onchange={(on) => (restoreKeyColors = on)} />
+				<Checkbox
+					label="Keys and macros"
+					description="Keys of {summary.keys}. Macros: {summary.macros}."
+					checked={restoreKeys}
+					onchange={(on) => (restoreKeys = on)}
+				/>
+			</FieldGroup>
+			<Hint>Keys and macros go together because keys refer to macros by number. The keyboard stays on the profile it is using.</Hint>
+		{/if}
+
+		{#if restoredName}
+			<Alert tone="ok" title="Restored">Restored from {restoredName} and read back from the keyboard.</Alert>
+		{/if}
+	</Card>
+</div>
+
+<ConfirmDialog open={confirming} title="Replace settings on the keyboard?" confirmLabel="Restore" onconfirm={restore} oncancel={() => (confirming = false)}>
+	<p>
+		The chosen parts of {loaded?.fileName ?? 'the file'} replace the keyboard's settings. Save a backup first if you may want the current ones back.
+	</p>
+</ConfirmDialog>
 
 <style>
-	p {
-		margin: 0;
-		max-width: 70ch;
-	}
-
-	.actions {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 8px;
-		margin: 16px 0;
-	}
-
-	dl {
+	.backup {
 		display: grid;
-		grid-template-columns: max-content 1fr;
-		gap: 6px 20px;
-		margin: 16px 0;
+		align-items: start;
+		gap: var(--space-6);
 	}
 
-	dt {
-		color: var(--text-muted);
-	}
-
-	dd {
-		margin: 0;
-	}
-
-	fieldset {
-		display: grid;
-		gap: 10px;
-		margin: 16px 0 12px;
-		padding: 0;
-		border: 0;
-	}
-
-	legend {
-		margin-bottom: 10px;
-		padding: 0;
-		font-weight: 600;
-	}
-
-	.part {
-		display: grid;
-		gap: 2px;
-	}
-
-	.detail,
-	.hint {
-		font-size: 13px;
-		color: var(--text-muted);
-	}
-
-	.part .detail {
-		padding-left: 24px;
+	@container content (min-width: 48rem) {
+		.backup {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
 	}
 </style>

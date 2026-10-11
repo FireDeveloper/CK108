@@ -2,7 +2,7 @@
 
 A static web app that configures the MotoSpeed CK108 keyboard over WebHID, replacing the vendor's Windows-only driver app. The protocol it speaks is specified in `../PROTOCOL.md`.
 
-Current stage: connect, show the keyboard's identity and active profile, edit lighting (effect, brightness, speed, direction, colour and rainbow, each control shown only for the effects that use it), paint per-key colours for Custom backlit mode on a drawing of the keyboard, switch the active profile and remap its keys (to another key, modifiers, a media key, a built-in edit shortcut, a macro, or nothing), record, build and edit macros, and save every setting to a JSON backup file and restore chosen parts from one. Every change is written to the keyboard and read back.
+Current stage: connect, show the keyboard's identity and active profile, edit lighting (effect, brightness, speed, direction, colour, rainbow and Surmount's preset colour, each control shown only for the effects that use it), paint per-key colours for Custom backlit mode on a drawing of the keyboard or pick one of the ready-made patterns or a gradient of your own colours, with Undo, switch the active profile and remap its keys (to another key, modifiers, a media key, a built-in edit shortcut, a macro, or nothing), record, build and edit macros, and save every setting to a JSON backup file and restore chosen parts from one. Every change is written to the keyboard and read back. The interface is monochrome in light and dark themes, follows the system theme or a choice remembered in the browser, and adapts to narrow windows.
 
 ## Run
 
@@ -38,8 +38,10 @@ On Linux the browser needs access to the keyboard's hidraw node; add `/etc/udev/
 - `src/lib/ck108/keymap.ts` - key map entries: decode, encode, and display names for what a key does
 - `src/lib/ck108/macros.ts` - the macro blob: model, encoder, decoder, and fitting it into the keyboard's macro space
 - `src/lib/backup/backup.ts` - the backup file format: JSON with byte blocks as hex and macros as readable objects, checked field by field on load
+- `src/lib/device/` - the keyboard in the app frame: the device panel with the profile switch, the connect screen, and the placeholder shown while settings are read
 - `src/lib/lighting/`, `src/lib/key-colors/`, `src/lib/remap/`, `src/lib/macros/`, `src/lib/backup/` - the editors behind each screen
-- `src/lib/ui/` - the shared components; pages build their UI from these and never from raw form elements
+- `src/lib/ui/` - the shared components, from the app frame, cards and dialogs down to every form control, plus the theme switch and its stored choice; pages build their UI from these and never from raw form elements
+- `src/app.css` - the design tokens: a hue-free gray scale, the light and dark theme aliases, type, spacing, radius and motion; `src/app.html` applies a stored theme before the first paint
 - `src/routes/` - pages; the root layout gates every page behind the connect screen and prerenders, so each route ships as static HTML
 
 WebHID hands the report ID to `sendReport()` separately from the data, so data indexes in `protocol.ts` are one less than the byte numbers in `PROTOCOL.md`.

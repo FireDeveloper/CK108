@@ -1,9 +1,30 @@
 <!doctype html>
-<html lang="en">
+<!--
+	@file app.html
+	@brief Page skeleton for every route: metadata, the theme chosen before first paint, and the SvelteKit head and body slots.
+	@note The theme-color values match --bg-sidebar of each theme in app.css; theme.svelte.ts keeps them in step after a change.
+-->
+<html lang="en-GB">
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="text-scale" content="scale" />
+		<meta name="description" content="Configure the lighting, keys, macros and profiles of a MotoSpeed CK108 keyboard from the browser." />
+		<meta name="color-scheme" content="light dark" />
+		<meta name="theme-color" content="#f5f5f5" media="(prefers-color-scheme: light)" />
+		<meta name="theme-color" content="#0f0f0f" media="(prefers-color-scheme: dark)" />
+		<script>
+			//? A stored Light or Dark choice is applied before the stylesheets load, so the first frame never shows the other theme.
+			try {
+				const theme = localStorage.getItem('ck108-theme'); // stored choice, see theme.svelte.ts; null follows the system
+				if (theme === 'light' || theme === 'dark') { // forced choice stored
+					document.documentElement.dataset.theme = theme; // forced theme for app.css
+					for (const meta of document.querySelectorAll('meta[name="theme-color"]')) meta.setAttribute('content', theme === 'dark' ? '#0f0f0f' : '#f5f5f5'); // browser chrome follows the forced theme
+				}
+			} catch {
+				//? Storage access throws when the browser blocks it; the system theme applies then.
+			}
+		</script>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">

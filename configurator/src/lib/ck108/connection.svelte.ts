@@ -29,8 +29,8 @@ export interface RestoreParts {
 export class Connection {
 	status = $state<Status>('checking'); // lifecycle stage
 	info = $state.raw<Info | null>(null); // last info block read
-	lighting = $state.raw<Lighting | null>(null); // last lighting block read
-	keyColors = $state.raw<Uint8Array | null>(null); // last per-key colour buffer read, R G B per LED
+	lighting = $state.raw<Lighting | null>(null); // last lighting read of the active profile
+	keyColors = $state.raw<Uint8Array | null>(null); // last per-key colour read of the active profile, R G B per LED
 	keymaps = $state.raw<readonly Uint8Array[] | null>(null); // last key map read of every profile
 	defaultKeymap = $state.raw<Uint8Array | null>(null); // factory key map
 	macros = $state.raw<readonly Macro[] | null>(null); // last macros read, in stored order
@@ -93,15 +93,15 @@ export class Connection {
 		await keyboard?.close(); // release the collection
 	}
 
-	/** @brief Read the info block, lighting block, per-key colours, every profile's key map, the factory key map and the macros again. */
+	/** @brief Read the info block, the active profile's lighting and per-key colours, every profile's key map, the factory key map and the macros again. */
 	async refresh(): Promise<void> {
 		const keyboard = this.#keyboard; // open keyboard
 		if (!keyboard) return; // nothing to read
 		this.error = null; // clear the previous failure
 		try {
 			this.info = await keyboard.readInfo(); // identity, firmware, profile, modes
-			this.lighting = await keyboard.readLighting(); // current effect
-			this.keyColors = await keyboard.readKeyColors(); // custom effect colours
+			this.lighting = await keyboard.readLighting(this.info.profile); // active profile's effect
+			this.keyColors = await keyboard.readKeyColors(this.info.profile); // active profile's custom effect colours
 			this.defaultKeymap = await keyboard.readDefaultKeymap(); // factory key map
 			const keymaps: Uint8Array[] = []; // every profile, in profile order
 			for (let profile = 0; profile < PROFILES; profile++) keymaps.push(await keyboard.readKeymap(profile)); // one profile at a time
@@ -113,7 +113,7 @@ export class Connection {
 	}
 
 	/**
-	 * @brief Show a new active profile at once, switch the keyboard to it, then read the info block back so the UI shows the profile in use.
+	 * @brief Show a new active profile at once, switch the keyboard to it, then read back the info block and the new profile's lighting and key colours.
 	 * @param[in] profile 0..PROFILES-1.
 	 */
 	async setProfile(profile: number): Promise<void> {
@@ -126,7 +126,10 @@ export class Connection {
 		try {
 			await keyboard.setProfile(profile); // info block with the new profile
 			const stored = await keyboard.readInfo(); // keyboard's info block after the write
-			if (this.info) this.info = stored; // show the profile in use, unless it was unplugged meanwhile
+			const lighting = await keyboard.readLighting(stored.profile); // that profile's effect
+			const keyColors = await keyboard.readKeyColors(stored.profile); // that profile's custom effect colours
+			if (!this.info) return; // unplugged meanwhile
+			[this.info, this.lighting, this.keyColors] = [stored, lighting, keyColors]; // show the profile in use
 		} catch (error) {
 			if (this.info) this.info = previous; // back to the last profile read
 			this.error = describe(error); // command failure
@@ -136,17 +139,18 @@ export class Connection {
 	}
 
 	/**
-	 * @brief Write lighting fields, then read the lighting block back so the UI shows what the keyboard holds.
+	 * @brief Write lighting fields of the active profile, then read its record back so the UI shows what the keyboard holds.
 	 * @param[in] fields Field writes in send order, from byteField() or colorFields().
 	 */
 	async applyLighting(fields: readonly LightingField[]): Promise<void> {
 		const keyboard = this.#keyboard; // open keyboard
-		if (!keyboard) return; // nothing to write to
+		const profile = this.info?.profile; // profile whose lighting is shown
+		if (!keyboard || profile === undefined) return; // nothing to write to
 		this.error = null; // clear the previous failure
 		this.pending++; // write in flight
 		try {
-			await keyboard.writeLighting(fields); // send the change
-			this.lighting = await keyboard.readLighting(); // keyboard's state after the write
+			await keyboard.writeLighting(profile, fields); // send the change
+			this.lighting = await keyboard.readLighting(profile); // keyboard's state after the write
 		} catch (error) {
 			this.error = describe(error); // command failure
 		} finally {
@@ -155,18 +159,19 @@ export class Connection {
 	}
 
 	/**
-	 * @brief Show new per-key colours at once, write them, then read the buffer back so the UI shows what the keyboard holds.
+	 * @brief Show new per-key colours of the active profile at once, write them, then read the buffer back so the UI shows what the keyboard holds.
 	 * @param[in] colors KEY_COLORS_SIZE bytes, R G B per LED; the caller must not modify it afterwards.
 	 */
 	async applyKeyColors(colors: Uint8Array): Promise<void> {
 		const keyboard = this.#keyboard; // open keyboard
-		if (!keyboard) return; // nothing to write to
+		const profile = this.info?.profile; // profile whose colours are shown
+		if (!keyboard || profile === undefined) return; // nothing to write to
 		this.error = null; // clear the previous failure
 		this.keyColors = colors; // show the change before the write lands
 		this.pending++; // write in flight
 		try {
-			await keyboard.writeKeyColors(colors); // send the buffer
-			this.keyColors = await keyboard.readKeyColors(); // keyboard's buffer after the write
+			await keyboard.writeKeyColors(profile, colors); // send the buffer
+			this.keyColors = await keyboard.readKeyColors(profile); // keyboard's buffer after the write
 		} catch (error) {
 			this.error = describe(error); // command failure
 		} finally {
@@ -247,12 +252,16 @@ export class Connection {
 		if (!keyboard || !info) return null; // nothing to read
 		this.error = null; // clear the previous failure
 
-		//- Fresh reads of every block
+		//- Fresh reads of every block, every profile in order
 		try {
-			const lighting = await keyboard.readLightingBlock(); // whole lighting block
-			const keyColors = await keyboard.readKeyColors(); // per-key colours
-			const keymaps: Uint8Array[] = []; // every profile, in profile order
-			for (let profile = 0; profile < PROFILES; profile++) keymaps.push(await keyboard.readKeymap(profile)); // one profile at a time
+			const lighting: Uint8Array[] = []; // lighting records
+			const keyColors: Uint8Array[] = []; // per-key colour buffers
+			const keymaps: Uint8Array[] = []; // key maps
+			for (let profile = 0; profile < PROFILES; profile++) {
+				lighting.push(await keyboard.readLightingBlock(profile)); // whole lighting record
+				keyColors.push(await keyboard.readKeyColors(profile)); // per-key colours
+				keymaps.push(await keyboard.readKeymap(profile)); // key map
+			}
 			const macros = decodeMacros(await keyboard.readMacros(info.macroSpace)); // stored macros
 			return { savedAt: new Date().toISOString(), firmware: info.firmware, activeProfile: info.profile, lighting, keyColors, keymaps, macros }; // backup
 		} catch (error) {
@@ -266,7 +275,8 @@ export class Connection {
 	 * @param[in] backup Parsed backup file.
 	 * @param[in] parts Which parts to write.
 	 * @return True when every chosen part was written; false otherwise, with error set.
-	 * @note Lighting restores the leading LIGHTING_SETTINGS_SIZE bytes, as the vendor Default button writes them; the rest of the block stays as it is.
+	 * @note Lighting restores the leading LIGHTING_SETTINGS_SIZE bytes of each profile's record, as the vendor Default button writes them;
+	 *       the rest stays as it is.
 	 * @note Keys and macros are written together, in one session, because key map entries refer to macros by position.
 	 */
 	async restore(backup: Backup, parts: RestoreParts): Promise<boolean> {
@@ -287,8 +297,10 @@ export class Connection {
 		let failure: string | null = null; // first write failure
 		this.pending++; // writes in flight
 		try {
-			if (parts.lighting) await keyboard.writeLighting([[0, backup.lighting.slice(0, LIGHTING_SETTINGS_SIZE)]]); // lighting settings in one packet
-			if (parts.keyColors) await keyboard.writeKeyColors(backup.keyColors); // per-key colours
+			for (let profile = 0; profile < PROFILES; profile++) {
+				if (parts.lighting) await keyboard.writeLighting(profile, [[0, backup.lighting[profile].slice(0, LIGHTING_SETTINGS_SIZE)]]); // lighting settings in one packet
+				if (parts.keyColors) await keyboard.writeKeyColors(profile, backup.keyColors[profile]); // per-key colours
+			}
 			if (packed) await keyboard.writeMacros(packed.blob, new Map(backup.keymaps.map((map, profile) => [profile, map]))); // macros, then every key map
 		} catch (error) {
 			failure = describe(error); // command failure; later parts are skipped

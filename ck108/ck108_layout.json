@@ -160,46 +160,6 @@
   "h": 20
  },
  {
-  "name": "Vol-",
-  "scancode": null,
-  "led": 17,
-  "slot": 102,
-  "x": 836,
-  "y": 159,
-  "w": 18,
-  "h": 20
- },
- {
-  "name": "Media",
-  "scancode": null,
-  "led": 18,
-  "slot": 108,
-  "x": 863,
-  "y": 159,
-  "w": 18,
-  "h": 20
- },
- {
-  "name": "Play/Pause",
-  "scancode": null,
-  "led": 19,
-  "slot": 114,
-  "x": 890,
-  "y": 159,
-  "w": 18,
-  "h": 20
- },
- {
-  "name": "Vol+",
-  "scancode": null,
-  "led": 20,
-  "slot": 120,
-  "x": 917,
-  "y": 159,
-  "w": 18,
-  "h": 20
- },
- {
   "name": "`",
   "scancode": 41,
   "led": 21,

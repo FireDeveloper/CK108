@@ -1,11 +1,13 @@
 <script lang="ts">
 	/**
 	 * @file KeyMap.svelte
-	 * @brief Shared keyboard drawing: keys placed by rectangle, filled with a colour or the theme's key colour, selected by click, drag, or Enter/Space on a focused key.
-	 * @note Rectangles may use any unit; the map scales them to its width and keeps their proportions.
+	 * @brief Shared keyboard drawing: keycaps placed by rectangle, filled with a colour or drawn plain, selected by click, drag, or Enter/Space on a focused key.
+	 * @note Rectangles may use any unit; the drawing scales them to its width, keeps their proportions, and scrolls sideways below a minimum width.
 	 * @note With multiple off, a press selects that key alone and drags do nothing.
-	 * @note A key without a colour takes the theme's key colours; a marked key is tinted with the accent colour.
+	 * @note A selected plain key is drawn inverted, a selected coloured key gets an inner ring in its text colour, and a marked key carries a dot.
 	 */
+	import { inkFor } from './ink.ts';
+
 	interface MapKey {
 		id: number;
 		name: string;
@@ -16,6 +18,7 @@
 		h: number;
 		color?: string;
 		marked?: boolean;
+		detail?: string;
 	}
 
 	interface Props {
@@ -73,16 +76,6 @@
 	}
 
 	/**
-	 * @brief Pick readable keycap text for a fill colour.
-	 * @param[in] color "#rrggbb" fill.
-	 * @return Dark text on light fills, light text on dark fills.
-	 */
-	function inkFor(color: string): string {
-		const [r, g, b] = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16)); // channel values
-		return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? '#111' : '#f4f4f4'; // perceived brightness threshold
-	}
-
-	/**
 	 * @brief Express a drawing coordinate as a percentage of the drawing box.
 	 * @param[in] value Coordinate or size in drawing units.
 	 * @param[in] origin Drawing box origin on that axis, 0 for sizes.
@@ -96,37 +89,48 @@
 
 <svelte:window onpointerup={() => (dragSelects = null)} onpointercancel={() => (dragSelects = null)} />
 
-<div class="map" role="group" aria-label={label} style:aspect-ratio="{bounds.width} / {bounds.height}">
-	{#each keys as key (key.id)}
-		<button
-			type="button"
-			class={['key', { selected: selected.has(key.id), themed: !key.color, marked: key.marked }]}
-			style:left={percent(key.x, bounds.left, bounds.width)}
-			style:top={percent(key.y, bounds.top, bounds.height)}
-			style:width={percent(key.w, 0, bounds.width)}
-			style:height={percent(key.h, 0, bounds.height)}
-			style:--fill={key.color}
-			style:--ink={key.color && inkFor(key.color)}
-			aria-pressed={selected.has(key.id)}
-			aria-label={key.name}
-			title={key.name}
-			onpointerdown={(event) => beginDrag(event, key.id)}
-			onpointerenter={() => extendDrag(key.id)}
-			onclick={(event) => keyboardToggle(event, key.id)}
-		>
-			{key.label}
-		</button>
-	{/each}
+<div class="scroller">
+	<div class="map" role="group" aria-label={label} style:aspect-ratio="{bounds.width} / {bounds.height}">
+		{#each keys as key (key.id)}
+			<button
+				type="button"
+				class={['key', { selected: selected.has(key.id), coloured: !!key.color, marked: key.marked, single: !multiple }]}
+				style:left={percent(key.x, bounds.left, bounds.width)}
+				style:top={percent(key.y, bounds.top, bounds.height)}
+				style:width={percent(key.w, 0, bounds.width)}
+				style:height={percent(key.h, 0, bounds.height)}
+				style:--fill={key.color}
+				style:--ink={key.color && inkFor(key.color)}
+				aria-pressed={selected.has(key.id)}
+				aria-label={key.detail ? `${key.name}, ${key.detail}` : key.name}
+				title={key.detail ? `${key.name}: ${key.detail}` : key.name}
+				onpointerdown={(event) => beginDrag(event, key.id)}
+				onpointerenter={() => extendDrag(key.id)}
+				onclick={(event) => keyboardToggle(event, key.id)}
+			>
+				<span class="cap">{key.label}</span>
+			</button>
+		{/each}
+	</div>
 </div>
 
 <style>
+	.scroller {
+		margin: -4px;
+		padding: 4px;
+		overflow-x: auto;
+		overscroll-behavior-x: contain;
+		scrollbar-width: thin;
+	}
+
 	.map {
 		position: relative;
 		width: 100%;
+		min-width: 640px;
 		container-type: inline-size;
-		border-radius: var(--radius);
-		background: var(--surface-raised);
 		border: 1px solid var(--border);
+		border-radius: var(--radius-md);
+		background: var(--surface-inset);
 	}
 
 	.key {
@@ -134,42 +138,80 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		padding: 0;
-		overflow: hidden;
-		border-radius: 4px;
-		border: 1px solid var(--border);
-		background: var(--fill);
-		color: var(--ink);
-		font: inherit;
-		font-size: clamp(8px, 1.05cqw, 13px);
-		font-weight: 600;
-		white-space: nowrap;
-		box-shadow: inset 0 -2px 0 rgb(0 0 0 / 0.25);
+		padding: 0 2px;
+		border: 1px solid var(--key-edge);
+		border-radius: 5px;
+		background: var(--key-face);
+		color: var(--text);
+		font: var(--weight-medium) clamp(8px, 1.05cqw, 13px) / 1 var(--font-sans);
+		box-shadow: var(--shadow-key);
 		cursor: pointer;
 		user-select: none;
 		touch-action: none;
+		transition:
+			background-color var(--duration-fast) var(--ease-standard),
+			border-color var(--duration-fast) var(--ease-standard),
+			color var(--duration-fast) var(--ease-standard),
+			translate var(--duration-fast) var(--ease-standard);
 	}
 
-	.key.themed {
-		background: var(--surface);
-		color: var(--text);
+	.key.single {
+		touch-action: manipulation;
+	}
+
+	.cap {
+		min-width: 0;
+		overflow: hidden;
+		letter-spacing: -0.01em;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.key.coloured {
+		background: var(--fill);
+		color: var(--ink);
+	}
+
+	@media (hover: hover) {
+		.key:hover {
+			border-color: var(--text-subtle);
+		}
 	}
 
 	.key.marked {
-		background: var(--accent-soft);
-		border-color: var(--accent);
-		color: var(--text);
+		font-weight: 700;
+	}
+
+	.key.marked::after {
+		content: '';
+		position: absolute;
+		top: 3px;
+		right: 3px;
+		width: 5px;
+		height: 5px;
+		border-radius: var(--radius-full);
+		background: currentColor;
 	}
 
 	.key.selected {
-		outline: 2px solid var(--accent);
-		outline-offset: 1px;
-		z-index: 1;
+		z-index: var(--z-raised);
+		box-shadow: none;
+		translate: 0 1px;
+	}
+
+	.key.selected:not(.coloured) {
+		border-color: var(--accent);
+		background: var(--accent);
+		color: var(--accent-text);
+	}
+
+	.key.selected.coloured {
+		box-shadow: inset 0 0 0 2px var(--ink);
 	}
 
 	.key:focus-visible {
-		outline: 2px solid var(--focus);
-		outline-offset: 2px;
-		z-index: 2;
+		z-index: var(--z-focus);
+		outline: var(--focus-width) solid var(--focus);
+		outline-offset: var(--focus-offset);
 	}
 </style>

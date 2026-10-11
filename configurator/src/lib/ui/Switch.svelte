@@ -16,7 +16,7 @@
 <label class={['switch', { disabled }]}>
 	<input type="checkbox" role="switch" {checked} {disabled} onchange={(event) => onchange?.(event.currentTarget.checked)} />
 	<span class="track" aria-hidden="true"><span class="thumb"></span></span>
-	{label}
+	<span>{label}</span>
 </label>
 
 <style>
@@ -29,25 +29,30 @@
 	}
 
 	.switch.disabled {
-		opacity: 0.5;
+		opacity: var(--disabled-opacity);
 		cursor: not-allowed;
 	}
 
 	input {
 		position: absolute;
-		opacity: 0;
 		width: 1px;
 		height: 1px;
+		margin: 0;
+		opacity: 0;
 	}
 
 	.track {
 		position: relative;
-		width: 36px;
-		height: 20px;
-		border-radius: 999px;
-		background: var(--surface-raised);
-		border: 1px solid var(--border);
-		transition: background-color 120ms;
+		flex: none;
+		width: 32px;
+		height: 18px;
+		border-radius: var(--radius-full);
+		background: var(--border-control);
+		transition: background-color var(--duration-base) var(--ease-standard);
+	}
+
+	.switch:hover input:not(:checked, :disabled) + .track {
+		background: var(--text-subtle);
 	}
 
 	.thumb {
@@ -56,23 +61,25 @@
 		left: 2px;
 		width: 14px;
 		height: 14px;
-		border-radius: 50%;
-		background: var(--text-muted);
-		transition: transform 120ms;
+		border-radius: var(--radius-full);
+		background: var(--gray-0);
+		box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+		transition:
+			translate var(--duration-base) var(--ease-standard),
+			background-color var(--duration-base) var(--ease-standard);
 	}
 
 	input:checked + .track {
 		background: var(--accent);
-		border-color: var(--accent);
 	}
 
 	input:checked + .track .thumb {
-		transform: translateX(16px);
+		translate: 14px 0;
 		background: var(--accent-text);
 	}
 
 	input:focus-visible + .track {
-		outline: 2px solid var(--focus);
-		outline-offset: 2px;
+		outline: var(--focus-width) solid var(--focus);
+		outline-offset: var(--focus-offset);
 	}
 </style>

@@ -1,10 +1,11 @@
 <script lang="ts">
 	/**
 	 * @file MacroEditor.svelte
-	 * @brief Macros screen: the stored macros with the keys that play them, space used, and create, edit and delete.
+	 * @brief Macros screen: the stored macros with the keys that play them, the space they use, and create, edit and delete.
 	 * @note Deleting a macro also rewrites every profile whose keys refer to it or to a later macro, so each key keeps playing the same macro.
+	 * @note On wide screens the open macro sits beside the list; on narrow ones it follows below.
 	 */
-	import { Pencil, Plus, Trash2 } from '@lucide/svelte';
+	import { FilePenLine, ListVideo, Pencil, Plus, Trash2 } from '@lucide/svelte';
 	import { resolve } from '$app/paths';
 	import { getConnection } from '#lib/ck108/connection.svelte.ts';
 	import { decodeAction, withoutMacro } from '#lib/ck108/keymap.ts';
@@ -13,6 +14,10 @@
 	import Alert from '#lib/ui/Alert.svelte';
 	import Button from '#lib/ui/Button.svelte';
 	import Card from '#lib/ui/Card.svelte';
+	import ConfirmDialog from '#lib/ui/ConfirmDialog.svelte';
+	import EmptyState from '#lib/ui/EmptyState.svelte';
+	import List from '#lib/ui/List.svelte';
+	import ListItem from '#lib/ui/ListItem.svelte';
 	import Meter from '#lib/ui/Meter.svelte';
 	import MacroForm from './MacroForm.svelte';
 
@@ -43,6 +48,7 @@
 			}).map((key) => key.name)
 		)
 	); // key names per macro, active profile
+	const confirmingName = $derived(confirming === null ? '' : (macros[confirming]?.name ?? '')); // name shown in the delete question
 
 	/**
 	 * @brief Write the macros with one macro added or replaced, and close the form on success.
@@ -69,6 +75,18 @@
 	}
 
 	/**
+	 * @brief Describe a macro for its list row.
+	 * @param[in] macro Stored macro.
+	 * @param[in] keys Names of the keys that play it.
+	 * @return Step count, plays per press when more than one, and the keys.
+	 */
+	function summary(macro: Macro, keys: readonly string[]): string {
+		const steps = `${macro.steps.length} ${macro.steps.length === 1 ? 'step' : 'steps'}`; // length
+		const plays = macro.cycles > 1 ? `, plays ${macro.cycles} times` : ''; // repeats
+		return `${steps}${plays} - ${keys.length > 0 ? `on ${keys.join(', ')}` : 'not on a key yet'}`; // row detail
+	}
+
+	/**
 	 * @brief Delete a macro, renumbering the key references that follow it in every profile.
 	 * @param[in] index Macro to delete.
 	 */
@@ -91,117 +109,140 @@
 {/if}
 
 {#if justSaved}
-	<Alert tone="info" title={`Saved "${justSaved}"`}>
+	<Alert tone="ok" title={`Saved "${justSaved}"`} ondismiss={() => (justSaved = null)}>
 		Pick a key for it under <a href={resolve('/keys')}>Keys</a>: choose the key, then Macro.
 	</Alert>
 {/if}
 
-<Card title="Macros">
-	{#snippet actions()}
-		<Button
-			variant="ghost"
-			disabled={editing !== null || macros.length >= MACRO_LIMIT}
-			onclick={() => open(null)}
-		>
-			<Plus size={16} aria-hidden="true" />
-			New macro
-		</Button>
-	{/snippet}
+<div class="macros">
+	<Card title="Stored macros">
+		{#snippet actions()}
+			<Button size="sm" disabled={editing !== null || macros.length >= MACRO_LIMIT} onclick={() => open(null)}>
+				<Plus aria-hidden="true" />
+				New macro
+			</Button>
+		{/snippet}
 
-	<Meter label="Macro space" value={used} max={space} reading="{used} of {space} bytes" />
+		<Meter label="Macro space" value={used} max={space} reading="{used} of {space} bytes" />
 
-	{#if macros.length === 0}
-		<p class="hint">No macros stored. A macro plays a sequence of key presses from one key, for example a shortcut or a phrase.</p>
-	{:else}
-		<ul>
-			{#each macros as macro, index}
-				<li>
-					<div class="info">
-						<span class="name">{index + 1}. {macro.name}</span>
-						<span class="detail">
-							{macro.steps.length} {macro.steps.length === 1 ? 'step' : 'steps'}{macro.cycles > 1 ? `, plays ${macro.cycles} times` : ''} -
-							{keysByMacro[index].length > 0 ? `on ${keysByMacro[index].join(', ')}` : 'not on a key yet'}
+		{#if macros.length === 0}
+			<EmptyState title="No macros yet" icon={ListVideo}>
+				A macro plays a sequence of key presses from one key, for example a shortcut or a phrase.
+			</EmptyState>
+		{:else}
+			<List label="Stored macros">
+				{#each macros as macro, index}
+					<ListItem current={editing?.index === index}>
+						<span class="number">M{index + 1}</span>
+						<span class="info">
+							<span class="name">{macro.name}</span>
+							<span class="detail">{summary(macro, keysByMacro[index])}</span>
 						</span>
-					</div>
-					<div class="row-actions">
-						{#if confirming === index}
-							<span class="detail">Delete it?</span>
-							<Button variant="primary" onclick={() => remove(index)}>Delete</Button>
-							<Button onclick={() => (confirming = null)}>Keep</Button>
-						{:else}
-							<Button variant="ghost" disabled={editing !== null} onclick={() => open(index)}>
-								<Pencil size={16} aria-hidden="true" />
-								Edit
+						{#snippet actions()}
+							<Button
+								variant="ghost"
+								size="sm"
+								iconOnly
+								aria-label="Edit {macro.name}"
+								title="Edit"
+								disabled={editing !== null}
+								onclick={() => open(index)}
+							>
+								<Pencil aria-hidden="true" />
 							</Button>
-							<Button variant="ghost" disabled={editing !== null} onclick={() => (confirming = index)}>
-								<Trash2 size={16} aria-hidden="true" />
-								Delete
+							<Button
+								variant="ghost"
+								size="sm"
+								iconOnly
+								aria-label="Delete {macro.name}"
+								title="Delete"
+								disabled={editing !== null}
+								onclick={() => (confirming = index)}
+							>
+								<Trash2 aria-hidden="true" />
 							</Button>
-						{/if}
-					</div>
-				</li>
-			{/each}
-		</ul>
-	{/if}
-</Card>
+						{/snippet}
+					</ListItem>
+				{/each}
+			</List>
+		{/if}
+	</Card>
 
-{#if editing}
-	{@const index = editing.index}
-	{#key index}
-		<MacroForm
-			title={index === null ? 'New macro' : `Edit macro ${index + 1}`}
-			macro={index === null ? NEW_MACRO : macros[index]}
-			onsave={(macro) => save(index, macro)}
-			oncancel={() => (editing = null)}
-		/>
-	{/key}
-{/if}
+	{#if editing}
+		{@const index = editing.index}
+		{#key index}
+			<MacroForm
+				title={index === null ? 'New macro' : `Edit M${index + 1}`}
+				macro={index === null ? NEW_MACRO : macros[index]}
+				onsave={(macro) => save(index, macro)}
+				oncancel={() => (editing = null)}
+			/>
+		{/key}
+	{:else}
+		<div class="placeholder">
+			<Card>
+				<EmptyState title="No macro open" icon={FilePenLine}>Choose Edit on a macro, or create a new one.</EmptyState>
+			</Card>
+		</div>
+	{/if}
+</div>
+
+<ConfirmDialog
+	open={confirming !== null}
+	title={`Delete "${confirmingName}"?`}
+	confirmLabel="Delete macro"
+	cancelLabel="Keep"
+	onconfirm={() => confirming !== null && remove(confirming)}
+	oncancel={() => (confirming = null)}
+>
+	<p>Keys that play it get their factory function back, and the macros after it move up one number on every profile.</p>
+</ConfirmDialog>
 
 <style>
-	ul {
+	.macros {
 		display: grid;
-		margin: 16px 0 0;
-		padding: 0;
-		list-style: none;
+		align-items: start;
+		gap: var(--space-6);
 	}
 
-	li {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		justify-content: space-between;
-		gap: 8px 16px;
-		padding: 10px 0;
-		border-top: 1px solid var(--border);
+	.number {
+		flex: none;
+		min-width: 2.25rem;
+		font-family: var(--font-mono);
+		font-size: var(--text-sm);
+		font-variant-numeric: tabular-nums;
+		color: var(--text-muted);
 	}
 
 	.info {
 		display: grid;
-		gap: 2px;
+		gap: 1px;
+		min-width: 0;
 	}
 
 	.name {
-		font-weight: 600;
+		overflow: hidden;
+		font-weight: var(--weight-medium);
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.detail {
-		font-size: 13px;
+		font-size: var(--text-sm);
 		color: var(--text-muted);
 	}
 
-	.row-actions {
-		display: flex;
-		align-items: center;
-		gap: 8px;
+	.placeholder {
+		display: none;
 	}
 
-	.hint {
-		margin: 16px 0 0;
-		font-size: 13px;
-		color: var(--text-muted);
-	}
+	@container content (min-width: 56rem) {
+		.macros {
+			grid-template-columns: 22rem minmax(0, 1fr);
+		}
 
-	a {
-		color: var(--accent);
+		.placeholder {
+			display: block;
+		}
 	}
 </style>

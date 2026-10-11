@@ -1,147 +1,240 @@
 <script lang="ts">
 	/**
 	 * @file +layout.svelte
-	 * @brief App shell: design tokens, the shared Connection, header with section tabs and status, and the connect screen that gates every page.
+	 * @brief App frame: the shared Connection, the sidebar with device, sections and theme, each section's page header and document title, and the connect
+	 *        screen that gates every page.
+	 * @note This layout owns the only document title, so every prerendered page carries its section's name.
 	 */
+	import '@fontsource-variable/inter';
 	import '../app.css';
 	import favicon from '#lib/assets/favicon.svg';
-	import { Keyboard, Plug } from '@lucide/svelte';
+	import { ArrowRightLeft, DatabaseBackup, Keyboard, Lightbulb, ListVideo, Palette, RefreshCw, Unplug } from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
-	import { Connection, setConnection, type Status } from '#lib/ck108/connection.svelte.ts';
+	import { Connection, setConnection } from '#lib/ck108/connection.svelte.ts';
+	import ConnectScreen from '#lib/device/ConnectScreen.svelte';
+	import DevicePanel from '#lib/device/DevicePanel.svelte';
 	import Alert from '#lib/ui/Alert.svelte';
+	import AppShell from '#lib/ui/AppShell.svelte';
 	import Button from '#lib/ui/Button.svelte';
-	import Card from '#lib/ui/Card.svelte';
-	import NavTabs from '#lib/ui/NavTabs.svelte';
+	import PageHeader from '#lib/ui/PageHeader.svelte';
+	import SidebarNav from '#lib/ui/SidebarNav.svelte';
+	import Spinner from '#lib/ui/Spinner.svelte';
 	import StatusPill from '#lib/ui/StatusPill.svelte';
+	import ThemeSwitch from '#lib/ui/ThemeSwitch.svelte';
 	import type { LayoutProps } from './$types';
 
 	let { children }: LayoutProps = $props(); // page content
 
-	const PILLS: Record<Status, { tone: 'neutral' | 'ok' | 'warn' | 'danger'; label: string }> = {
-		checking: { tone: 'neutral', label: 'Starting' },
-		unsupported: { tone: 'danger', label: 'WebHID unavailable' },
-		disconnected: { tone: 'neutral', label: 'Not connected' },
-		connecting: { tone: 'warn', label: 'Connecting' },
-		connected: { tone: 'ok', label: 'Connected' }
-	}; // status -> header badge
-	const SAVING = { tone: 'warn', label: 'Saving' } as const; // header badge while a write is in flight
+	/** @brief What the status pill shows. */
+	interface StatusView {
+		tone: 'neutral' | 'ok' | 'warn' | 'danger';
+		label: string;
+		busy: boolean;
+	}
+
+	const SAVED_MS = 2000; // how long the pill says Saved after a write lands
+	const SECTIONS = [
+		{
+			path: '/',
+			label: 'Lighting',
+			icon: Lightbulb,
+			description: 'Effect, brightness and colour of the backlight in the active profile. Changes are written to the keyboard as you make them.',
+			showsProfile: true
+		},
+		{
+			path: '/colors',
+			label: 'Key colours',
+			icon: Palette,
+			description: 'Paint keys, blend a gradient or pick a ready-made pattern for Custom backlit mode in the active profile. Every change is written to the keyboard at once.',
+			showsProfile: true
+		},
+		{
+			path: '/keys',
+			label: 'Keys',
+			icon: ArrowRightLeft,
+			description: 'Pick a key, choose what it sends, then assign it to the active profile.',
+			showsProfile: true
+		},
+		{
+			path: '/macros',
+			label: 'Macros',
+			icon: ListVideo,
+			description: 'Key sequences that one key can play. Nothing is written until you save.',
+			showsProfile: false
+		},
+		{
+			path: '/backup',
+			label: 'Backup',
+			icon: DatabaseBackup,
+			description: 'Save every setting to a file, or restore chosen parts from one.',
+			showsProfile: false
+		}
+	] as const; // sections in navigation order: link, title, icon, page description, profile badge
 
 	const connection = new Connection(); // one connection for every page
 	setConnection(connection); // share it with the pages
-	const pill = $derived(connection.pending > 0 ? SAVING : PILLS[connection.status]); // badge for the current status
-	const sections = $derived([
-		{ href: resolve('/'), label: 'Lighting', current: page.url.pathname === resolve('/') },
-		{ href: resolve('/colors'), label: 'Key colours', current: page.url.pathname === resolve('/colors') },
-		{ href: resolve('/keys'), label: 'Keys', current: page.url.pathname === resolve('/keys') },
-		{ href: resolve('/macros'), label: 'Macros', current: page.url.pathname === resolve('/macros') },
-		{ href: resolve('/backup'), label: 'Backup', current: page.url.pathname === resolve('/backup') }
-	]); // header tabs, current page marked
+	let refreshing = $state(false); // Refresh read in flight
+	let justSaved = $state(false); // a write landed moments ago
+	let wasPending = false; // writes were in flight at the last check; nothing renders it
+	let savedTimer: ReturnType<typeof setTimeout> | undefined; // return from Saved to Connected
+
+	//? Matched by route id, not by URL: resolve() returns relative paths while prerendering, and the route id carries no base path.
+	const current = $derived(SECTIONS.find((section) => page.route.id === section.path) ?? null); // section of the page shown
+	const pill = $derived(statusView()); // pill tone, label and activity
+	const navItems = $derived(
+		SECTIONS.map((section) => ({ href: resolve(section.path), label: section.label, icon: section.icon, current: section === current }))
+	); // section links, current page marked
+	const badge = $derived(current?.showsProfile && connection.info ? `Profile ${connection.info.profile + 1}` : undefined); // active profile, on the pages that edit one
+
+	//? Saved marks a moment rather than a state of the connection, so a timer started when the writes land clears it again.
+	$effect(() => {
+		//- Writes in flight: Saving takes over
+		if (connection.pending > 0) {
+			wasPending = true; // remember to report the landing
+			justSaved = false; // Saving replaces Saved
+			return; // wait for the write to land
+		}
+
+		//- A write just landed: show Saved for a moment, unless it failed
+		if (!wasPending) return; // nothing landed
+		wasPending = false; // this landing is handled
+		if (connection.error) return; // the error shows instead
+		justSaved = true; // show Saved
+		clearTimeout(savedTimer); // restart the moment after quick writes
+		savedTimer = setTimeout(() => (justSaved = false), SAVED_MS); // back to Connected
+	});
 
 	onMount(() => connection.start()); // WebHID setup in the browser; returns the cleanup
+
+	/**
+	 * @brief Choose what the status pill shows for the connection state.
+	 * @return Tone, label and whether to show activity.
+	 */
+	function statusView(): StatusView {
+		//- Before a keyboard is connected
+		if (connection.status === 'checking') return { tone: 'neutral', label: 'Starting', busy: true }; // WebHID check pending
+		if (connection.status === 'unsupported') return { tone: 'danger', label: 'WebHID unavailable', busy: false }; // browser cannot connect
+		if (connection.status === 'disconnected') return { tone: 'neutral', label: 'Not connected', busy: false }; // waiting for the user
+		if (connection.status === 'connecting') return { tone: 'neutral', label: 'Connecting', busy: true }; // opening the keyboard
+
+		//- Connected
+		if (connection.pending > 0) return { tone: 'neutral', label: 'Saving', busy: true }; // writes in flight
+		if (connection.error) return { tone: 'danger', label: 'Error', busy: false }; // last operation failed
+		if (justSaved) return { tone: 'ok', label: 'Saved', busy: false }; // a write just landed
+		return { tone: 'ok', label: 'Connected', busy: false }; // idle
+	}
+
+	/** @brief Read every setting from the keyboard again. */
+	async function refresh(): Promise<void> {
+		refreshing = true; // spinner on the button
+		try {
+			await connection.refresh(); // every block read again
+		} finally {
+			refreshing = false; // ready again
+		}
+	}
 </script>
 
 <svelte:head>
+	<title>{current ? `${current.label} - CK108 Configurator` : 'CK108 Configurator'}</title>
 	<link rel="icon" href={favicon} />
 </svelte:head>
 
-<header>
-	<div class="brand">
-		<Keyboard size={22} aria-hidden="true" />
-		<span>CK108 Configurator</span>
-	</div>
-	{#if connection.status === 'connected'}
-		<NavTabs label="Sections" items={sections} />
-	{/if}
-	<StatusPill tone={pill.tone} label={pill.label} />
-</header>
+<AppShell>
+	{#snippet brand()}
+		<a class="brand" href={resolve('/')}>
+			<span class="mark" aria-hidden="true"><Keyboard size={16} /></span>
+			<span class="name">CK108 <span class="product">Configurator</span></span>
+		</a>
+	{/snippet}
 
-<main>
-	{#if connection.status === 'unsupported'}
-		<Alert title="This browser cannot talk to the keyboard">
-			WebHID is only available in Chrome, Edge and other Chromium browsers, on an https:// or localhost address.
-		</Alert>
-	{/if}
+	{#snippet status()}
+		<StatusPill tone={pill.tone} label={pill.label} busy={pill.busy} />
+	{/snippet}
 
-	{#if connection.error}
-		<Alert tone="danger" title="Something went wrong">{connection.error}</Alert>
-	{/if}
+	{#snippet device()}
+		<DevicePanel tone={pill.tone} label={pill.label} busy={pill.busy} />
+	{/snippet}
 
-	{#if connection.status === 'disconnected' || connection.status === 'connecting'}
-		<Card>
-			<div class="intro">
-				<h1>Connect your MotoSpeed CK108</h1>
-				<p>
-					Your browser lists the keyboard in a device picker; choose it to read its settings. After the first time, this page
-					reconnects on its own.
-				</p>
-				<Button variant="primary" onclick={() => connection.connect()} disabled={connection.status === 'connecting'}>
-					<Plug size={16} aria-hidden="true" />
-					{connection.status === 'connecting' ? 'Connecting...' : 'Connect keyboard'}
+	{#snippet nav(orientation: 'vertical' | 'horizontal')}
+		{#if connection.status === 'connected'}
+			<SidebarNav label="Sections" items={navItems} {orientation} />
+		{/if}
+	{/snippet}
+
+	{#snippet footer()}
+		{#if connection.status === 'connected'}
+			<div class="device-actions">
+				<Button size="sm" disabled={refreshing} title="Read every setting from the keyboard again" onclick={refresh}>
+					{#if refreshing}<Spinner size={14} />{:else}<RefreshCw aria-hidden="true" />{/if}
+					Refresh
+				</Button>
+				<Button variant="ghost" size="sm" onclick={() => connection.disconnect()}>
+					<Unplug aria-hidden="true" />
+					Disconnect
 				</Button>
 			</div>
-		</Card>
-	{:else if connection.status === 'connected'}
-		{@render children()}
-	{/if}
-</main>
+		{/if}
+		<ThemeSwitch />
+	{/snippet}
 
-<footer>Changes are written to the keyboard as you make them, and stay on it after you close this page.</footer>
+	{#if connection.status === 'connected'}
+		{#if current}
+			<PageHeader title={current.label} description={current.description} {badge} />
+		{/if}
+		{#if connection.error}
+			<Alert tone="danger" title="Something went wrong" ondismiss={() => (connection.error = null)}>{connection.error}</Alert>
+		{/if}
+		{@render children()}
+	{:else}
+		<ConnectScreen />
+	{/if}
+</AppShell>
 
 <style>
-	header {
-		display: flex;
-		align-items: center;
-		gap: 24px;
-		padding: 12px 24px;
-		border-bottom: 1px solid var(--border);
-		background: var(--surface);
-	}
-
 	.brand {
-		display: flex;
+		display: inline-flex;
 		align-items: center;
 		gap: 10px;
-		font-weight: 700;
-		letter-spacing: 0.01em;
+		max-width: 100%;
+		color: var(--text);
+		font-weight: var(--weight-semibold);
+		text-decoration: none;
 	}
 
-	header > :global(:last-child) {
-		margin-left: auto;
-	}
-
-	main {
+	.mark {
 		display: grid;
-		gap: var(--space);
-		max-width: 1100px;
-		margin: 0 auto;
-		padding: 24px;
+		flex: none;
+		place-items: center;
+		width: 28px;
+		height: 28px;
+		border-radius: var(--radius-sm);
+		background: var(--accent);
+		color: var(--accent-text);
 	}
 
-	.intro {
+	.name {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.product {
+		color: var(--text-muted);
+		font-weight: var(--weight-medium);
+	}
+
+	.device-actions {
 		display: grid;
-		justify-items: start;
-		gap: 12px;
-		padding: 12px 4px;
+		grid-template-columns: 1fr 1fr;
+		gap: var(--space-2);
 	}
 
-	h1 {
-		margin: 0;
-		font-size: 22px;
-	}
-
-	p {
-		margin: 0;
-		max-width: 60ch;
-		color: var(--text-muted);
-	}
-
-	footer {
-		max-width: 1100px;
-		margin: 0 auto;
-		padding: 0 24px 24px;
-		color: var(--text-muted);
-		font-size: 13px;
+	@media (max-width: 26.25rem) {
+		.product {
+			display: none;
+		}
 	}
 </style>

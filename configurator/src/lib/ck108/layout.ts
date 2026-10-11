@@ -58,8 +58,6 @@ function keycapLabel(name: string): string {
 		PageDown: 'PgDn',
 		NumLock: 'Num',
 		'Num Enter': 'Ent',
-		'Play/Pause': 'Play',
-		Media: 'Mda',
 		Up: String.fromCharCode(0x2191), // up arrow
 		Down: String.fromCharCode(0x2193), // down arrow
 		Left: String.fromCharCode(0x2190), // left arrow

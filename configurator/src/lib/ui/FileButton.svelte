@@ -10,12 +10,13 @@
 	interface Props {
 		accept?: string;
 		variant?: 'primary' | 'secondary' | 'ghost';
+		size?: 'sm' | 'md';
 		disabled?: boolean;
 		children: Snippet;
 		onfile: (file: File) => void;
 	}
 
-	let { accept, variant = 'secondary', disabled = false, children, onfile }: Props = $props(); // file types, look, content, choice callback
+	let { accept, variant = 'secondary', size = 'md', disabled = false, children, onfile }: Props = $props(); // file types, look, size, content, choice callback
 	let input: HTMLInputElement | undefined = $state(); // hidden file input
 </script>
 
@@ -30,6 +31,6 @@
 		if (file) onfile(file); // report it
 	}}
 />
-<Button {variant} {disabled} onclick={() => input?.click()}>
+<Button {variant} {size} {disabled} onclick={() => input?.click()}>
 	{@render children()}
 </Button>

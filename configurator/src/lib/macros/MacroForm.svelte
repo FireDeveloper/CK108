@@ -4,15 +4,19 @@
 	 * @brief Editor for one macro: name, plays per key press, and its steps, filled by recording keys, adding a key combination, or by hand.
 	 * @note Nothing is written until Save; the parent writes the macro through onsave and closes the form when it reports success.
 	 */
-	import { ArrowDown, ArrowUp, Circle, Plus, Square, Trash2 } from '@lucide/svelte';
+	import { ArrowDown, ArrowDownToLine, ArrowUp, ArrowUpFromLine, Circle, Plus, Square, Trash2 } from '@lucide/svelte';
 	import { CYCLES_MAX, DELAY_MAX_MS, NAME_LIMIT, targetName, type Macro, type MacroStep, type StepTarget } from '#lib/ck108/macros.ts';
 	import { KEYBOARD_USAGES, MEDIA_USAGES, MODIFIERS, MODIFIER_USAGE_BASE, SYSTEM_USAGES, usageForCode } from '#lib/ck108/usages.ts';
 	import Alert from '#lib/ui/Alert.svelte';
 	import Button from '#lib/ui/Button.svelte';
 	import Card from '#lib/ui/Card.svelte';
 	import Checkbox from '#lib/ui/Checkbox.svelte';
+	import Hint from '#lib/ui/Hint.svelte';
+	import List from '#lib/ui/List.svelte';
+	import ListItem from '#lib/ui/ListItem.svelte';
 	import SegmentedControl from '#lib/ui/SegmentedControl.svelte';
 	import SelectMenu from '#lib/ui/SelectMenu.svelte';
+	import StatusPill from '#lib/ui/StatusPill.svelte';
 	import TextField from '#lib/ui/TextField.svelte';
 
 	interface Props {
@@ -28,8 +32,8 @@
 	const NAME_INPUT_LIMIT = 40; // longest name the form accepts, well under NAME_LIMIT
 	const COMBO_MODIFIERS = MODIFIERS.slice(0, 4); // left Ctrl, Shift, Alt, Win
 	const DIRECTIONS = [
-		{ value: 'press', label: 'Press' },
-		{ value: 'release', label: 'Release' }
+		{ value: 'press', label: 'Press', icon: ArrowDownToLine },
+		{ value: 'release', label: 'Release', icon: ArrowUpFromLine }
 	]; // step direction choices
 	const TARGETS = [
 		...MODIFIERS.map((modifier, index) => ({ value: `key:${MODIFIER_USAGE_BASE + index}`, label: modifier.name, group: 'Modifiers' })),
@@ -204,42 +208,49 @@
 <Card {title}>
 	<div class="fields">
 		<TextField label="Name" value={name} maxlength={Math.min(NAME_INPUT_LIMIT, NAME_LIMIT)} oninput={(value) => (name = value)} />
-		<TextField label="Plays per key press" type="number" min={1} max={CYCLES_MAX} value={cycles} suffix="times" oninput={(value) => (cycles = value)} />
+		<TextField
+			label="Plays per key press"
+			type="number"
+			min={1}
+			max={CYCLES_MAX}
+			value={cycles}
+			suffix="times"
+			error={isPlaysValid ? undefined : `Enter a whole number from 1 to ${CYCLES_MAX}.`}
+			oninput={(value) => (cycles = value)}
+		/>
 	</div>
-	{#if !isPlaysValid}
-		<p class="error">Plays per key press must be a whole number from 1 to {CYCLES_MAX}.</p>
-	{/if}
 
 	<section>
 		<h3>Record keys</h3>
 		<div class="row">
 			<Button variant={recording ? 'primary' : 'secondary'} onclick={toggleRecording}>
 				{#if recording}
-					<Square size={16} aria-hidden="true" />
+					<Square aria-hidden="true" />
 					Stop recording
 				{:else}
-					<Circle size={16} aria-hidden="true" />
+					<Circle aria-hidden="true" />
 					Start recording
 				{/if}
 			</Button>
+			{#if recording}<StatusPill tone="danger" label="Recording" />{/if}
 			<Checkbox label="Keep the pauses between keys" checked={recordPauses} disabled={recording} onchange={(on) => (recordPauses = on)} />
 		</div>
-		<p class="hint">
+		<Hint>
 			{#if recording}
-				Recording: every key you press and release is added below. Click Stop recording when done.
+				Every key you press and release is added below. Click Stop recording when done.
 			{:else}
-				Keys are added after the existing steps. Without the pauses, steps are {DEFAULT_DELAY_MS} ms apart. Shortcuts the browser keeps for
-				itself, such as Ctrl+W, cannot be recorded; add them as a combination instead.
+				Keys are added after the existing steps. Without the pauses, steps are {DEFAULT_DELAY_MS} ms apart. Shortcuts the browser keeps for itself,
+				such as Ctrl+W, cannot be recorded; add them as a combination instead.
 			{/if}
-		</p>
+		</Hint>
 		{#if skipped}
-			<p class="hint">{skipped} cannot be sent by the keyboard and was left out.</p>
+			<Hint>{skipped} cannot be sent by the keyboard and was left out.</Hint>
 		{/if}
 	</section>
 
 	<section>
 		<h3>Add a key combination</h3>
-		<div class="combo">
+		<div class="row">
 			{#each COMBO_MODIFIERS as modifier (modifier.bit)}
 				<Checkbox
 					label={modifier.short}
@@ -251,29 +262,43 @@
 				<SelectMenu label="Key" hideLabel options={KEY_OPTIONS} value={comboKey} placeholder="Key..." onchange={(value) => (comboKey = value)} />
 			</div>
 			<Button disabled={comboKey === null || recording} onclick={addCombination}>
-				<Plus size={16} aria-hidden="true" />
+				<Plus aria-hidden="true" />
 				Add
 			</Button>
 		</div>
 	</section>
 
 	<section>
-		<h3>Steps</h3>
+		<div class="steps-head">
+			<h3>Steps</h3>
+			<div class="row">
+				<Button variant="ghost" size="sm" disabled={recording} onclick={addStep}>
+					<Plus aria-hidden="true" />
+					Add step
+				</Button>
+				<Button variant="ghost" size="sm" disabled={recording || steps.length === 0} onclick={clearSteps}>
+					<Trash2 aria-hidden="true" />
+					Clear steps
+				</Button>
+			</div>
+		</div>
+
 		{#if steps.length === 0}
-			<p class="hint">No steps yet. Record keys, add a combination, or add steps one by one.</p>
+			<Hint>No steps yet. Record keys, add a combination, or add steps one by one.</Hint>
 		{:else}
-			<ol class="steps">
+			<List label="Steps" scroll>
 				{#each steps as item, index}
-					<li class={{ open: current === index }}>
-						<Button variant="ghost" onclick={() => (current = current === index ? null : index)} aria-expanded={current === index}>
-							<span class="number">{index + 1}</span>
-							<span class={['direction', { press: item.press }]}>{item.press ? 'Press' : 'Release'}</span>
-							<span class="target">{targetName(item.target)}</span>
-							{#if item.delay > 0}<span class="pause">then {item.delay} ms</span>{/if}
-						</Button>
-					</li>
+					<ListItem current={current === index} expanded={current === index} onclick={() => (current = current === index ? null : index)}>
+						<span class="number">{index + 1}</span>
+						<span class={['direction', { press: item.press }]}>
+							{#if item.press}<ArrowDownToLine aria-hidden="true" />{:else}<ArrowUpFromLine aria-hidden="true" />{/if}
+							{item.press ? 'Press' : 'Release'}
+						</span>
+						<span class="target">{targetName(item.target)}</span>
+						{#if item.delay > 0}<span class="pause">then {item.delay} ms</span>{/if}
+					</ListItem>
 				{/each}
-			</ol>
+			</List>
 		{/if}
 
 		{#if step && current !== null}
@@ -286,7 +311,7 @@
 					onchange={(value) => updateStep(index, { press: value === 'press' })}
 				/>
 				{#if step.target.page === 'raw'}
-					<p class="hint">{targetName(step.target)}: kept as stored.</p>
+					<Hint>{targetName(step.target)}: kept as stored.</Hint>
 				{:else}
 					<SelectMenu label="Key" options={TARGETS} value={targetValue(step.target)} onchange={(value) => updateStep(index, { target: parseTarget(value) })} />
 				{/if}
@@ -298,34 +323,31 @@
 					step={10}
 					suffix="ms"
 					value={String(step.delay)}
+					description="Stored in steps of 10 ms, up to {DELAY_MAX_MS} ms."
 					oninput={(value) => updateStep(index, { delay: Math.max(0, Number(value) || 0) })}
 				/>
 				<div class="row">
-					<Button variant="ghost" disabled={index === 0} onclick={() => moveStep(index, -1)} aria-label="Move step up" title="Move up">
-						<ArrowUp size={16} aria-hidden="true" />
+					<Button variant="ghost" size="sm" iconOnly aria-label="Move step up" title="Move up" disabled={index === 0} onclick={() => moveStep(index, -1)}>
+						<ArrowUp aria-hidden="true" />
 					</Button>
-					<Button variant="ghost" disabled={index === steps.length - 1} onclick={() => moveStep(index, 1)} aria-label="Move step down" title="Move down">
-						<ArrowDown size={16} aria-hidden="true" />
+					<Button
+						variant="ghost"
+						size="sm"
+						iconOnly
+						aria-label="Move step down"
+						title="Move down"
+						disabled={index === steps.length - 1}
+						onclick={() => moveStep(index, 1)}
+					>
+						<ArrowDown aria-hidden="true" />
 					</Button>
-					<Button variant="ghost" onclick={() => removeStep(index)}>
-						<Trash2 size={16} aria-hidden="true" />
+					<Button variant="ghost" size="sm" onclick={() => removeStep(index)}>
+						<Trash2 aria-hidden="true" />
 						Remove step
 					</Button>
 				</div>
-				<p class="hint">Pauses are stored in steps of 10 ms, up to {DELAY_MAX_MS} ms.</p>
 			</div>
 		{/if}
-
-		<div class="row">
-			<Button variant="ghost" disabled={recording} onclick={addStep}>
-				<Plus size={16} aria-hidden="true" />
-				Add step
-			</Button>
-			<Button variant="ghost" disabled={recording || steps.length === 0} onclick={clearSteps}>
-				<Trash2 size={16} aria-hidden="true" />
-				Clear steps
-			</Button>
-		</div>
 	</section>
 
 	{#if held.length > 0}
@@ -334,117 +356,108 @@
 		</Alert>
 	{/if}
 
-	<div class="actions">
-		<Button variant="primary" disabled={!canSave} onclick={save}>{saving ? 'Saving...' : 'Save to keyboard'}</Button>
+	{#snippet footer()}
 		<Button disabled={saving} onclick={oncancel}>Cancel</Button>
-	</div>
+		<Button variant="primary" disabled={!canSave} onclick={save}>{saving ? 'Saving...' : 'Save to keyboard'}</Button>
+	{/snippet}
 </Card>
 
 <style>
 	.fields {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-		gap: 16px;
-		max-width: 620px;
+		grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+		gap: var(--space-4);
 	}
 
 	section {
-		margin-top: 22px;
+		display: grid;
+		gap: var(--space-3);
+		padding-top: var(--space-5);
+		border-top: 1px solid var(--border);
 	}
 
 	h3 {
-		margin: 0 0 10px;
-		font-size: 14px;
+		font-size: var(--text-base);
 	}
 
-	.row,
-	.combo {
+	.row {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 8px 16px;
+		gap: var(--space-2) var(--space-4);
 	}
 
 	.combo-key {
-		width: 200px;
+		width: 13rem;
 	}
 
-	.steps {
-		display: grid;
-		gap: 2px;
-		max-height: 360px;
-		margin: 0 0 12px;
-		padding: 0;
-		overflow-y: auto;
-		list-style: none;
-		border: 1px solid var(--border);
-		border-radius: var(--radius-small);
+	.steps-head {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-2);
 	}
 
-	.steps li :global(.button) {
-		width: 100%;
-		justify-content: flex-start;
-		border-radius: 0;
-		font-weight: 400;
-		color: var(--text);
-	}
-
-	.steps li.open :global(.button) {
-		background: var(--accent-soft);
+	.steps-head .row {
+		gap: var(--space-1);
 	}
 
 	.number {
-		width: 2.5em;
-		color: var(--text-muted);
+		flex: none;
+		min-width: 2ch;
 		font-family: var(--font-mono);
-		font-size: 13px;
+		font-size: var(--text-sm);
+		font-variant-numeric: tabular-nums;
+		color: var(--text-muted);
 	}
 
 	.direction {
-		width: 5em;
+		display: inline-flex;
+		flex: none;
+		align-items: center;
+		gap: 6px;
+		width: 5.75rem;
 		color: var(--text-muted);
+	}
+
+	.direction :global(svg) {
+		width: 14px;
+		height: 14px;
 	}
 
 	.direction.press {
-		color: var(--accent);
+		color: var(--text);
+		font-weight: var(--weight-medium);
 	}
 
 	.target {
-		font-weight: 600;
+		min-width: 0;
+		overflow: hidden;
+		font-weight: var(--weight-medium);
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.pause {
+		flex: none;
 		margin-left: auto;
+		font-size: var(--text-sm);
+		font-variant-numeric: tabular-nums;
 		color: var(--text-muted);
-		font-size: 13px;
 	}
 
 	.step-editor {
 		display: grid;
-		gap: 14px;
-		max-width: 520px;
-		margin-bottom: 12px;
-		padding: 14px;
+		gap: var(--space-4);
+		max-width: 32rem;
+		padding: var(--space-4);
 		border: 1px solid var(--border);
-		border-radius: var(--radius-small);
-		background: var(--surface-raised);
+		border-radius: var(--radius-md);
+		background: var(--surface-inset);
 	}
 
-	.actions {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px;
-		margin-top: 22px;
-	}
-
-	.hint,
-	.error {
-		margin: 10px 0 0;
-		font-size: 13px;
-		color: var(--text-muted);
-	}
-
-	.error {
-		color: var(--danger);
+	.step-editor .row {
+		gap: var(--space-1);
 	}
 </style>

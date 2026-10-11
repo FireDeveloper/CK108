@@ -36,26 +36,35 @@ export const Command = {
 
 export const LED_SLOTS = 144; // per-key colour buffer length in LEDs
 export const LEDS_PER_CHUNK = 18; // LEDs per colour packet, 54 bytes
-export const KEY_COLORS_SIZE = LED_SLOTS * 3; // per-key colour buffer length in bytes, R G B per LED
+export const KEY_COLORS_SIZE = LED_SLOTS * 3; // one profile's per-key colour buffer in bytes, R G B per LED
+export const KEY_COLORS_STRIDE = 0x200; // colour store bytes per profile, padding included; profile n's buffer starts at n * KEY_COLORS_STRIDE
 
 export const SESSION_END_DELAY_MS = 10; // pause before Command.end, as in the vendor app
 
 export const INFO_SIZE = 0x2c; // info block length
 export const INFO_PROFILE = 0x0a; // info block offset of the active profile
-export const LIGHTING_SIZE = 0x38; // lighting block length
-export const LIGHTING_SETTINGS_SIZE = 0x23; // leading lighting bytes the vendor Default button writes: mode through the extra colour slots
+export const LIGHTING_RECORD_SIZE = 0x2a; // one profile's lighting record; profile n's starts at n * LIGHTING_RECORD_SIZE
+export const LIGHTING_SETTINGS_SIZE = 0x23; // leading record bytes the vendor Default button writes: mode through the extra colour slots
 export const LEVEL_MAX = 5; // highest brightness and speed level
 
 export const LightingOffset = {
 	mode: 0x00, // effect mode
 	brightness: 0x01, // brightness level
 	speed: 0x02, // speed level, LEVEL_MAX is slowest
-	direction: 0x03, // 0 forward, 1 reverse
+	direction: 0x03, // 0 or 1; DIRECTIONS names what each does on each effect
 	colorful: 0x04, // rainbow flag
-	color: 0x05 // effect colour, R G B
+	color: 0x05, // effect colour, R G B
+	preset: 0x08 // Surmount colour, an index into PRESETS
 } as const;
 
 export const MODE_CUSTOM = 20; // per-key colour mode
+
+export const PRESETS: readonly { name: string; color: string }[] = [
+	{ name: 'Red', color: '#ff0000' },
+	{ name: 'Yellow', color: '#ffff00' },
+	{ name: 'Green', color: '#00ff00' },
+	{ name: 'Blue', color: '#0000ff' }
+]; // Surmount colours by LightingOffset.preset value, as the vendor buttons show them
 
 /** @brief Lighting controls an effect uses, as the vendor app shows them. */
 export interface ModeControls {
@@ -63,6 +72,7 @@ export interface ModeControls {
 	direction: boolean;
 	color: boolean;
 	rainbow: boolean;
+	preset: boolean;
 }
 
 export const MODES: Readonly<Record<number, string>> = {
@@ -71,7 +81,7 @@ export const MODES: Readonly<Record<number, string>> = {
 	3: 'Winding paths',
 	4: 'The trial of light',
 	5: 'Breathing',
-	6: 'Normally on',
+	6: 'Static',
 	7: 'Pass without trace',
 	8: 'Ripple graff',
 	9: 'Fast run without trace',
@@ -85,7 +95,22 @@ export const MODES: Readonly<Record<number, string>> = {
 	17: 'Surmount',
 	18: 'Fast and the Furious',
 	20: 'Custom backlit mode'
-}; // mode byte -> vendor UI name
+}; // mode byte -> effect name, as the vendor UI names it except Static, its Normally on
+
+/** @brief One direction an effect can run in: the LightingOffset.direction byte and what the keys do with it. */
+export interface Direction {
+	value: number;
+	name: string;
+}
+
+//? Names follow what the keys do: the vendor app labels these effects with left and right arrows, and swaps gather and spread on mode 18.
+export const DIRECTIONS: Readonly<Record<number, readonly Direction[]>> = {
+	1: [{ value: 1, name: 'Left' }, { value: 0, name: 'Right' }],
+	2: [{ value: 1, name: 'Left' }, { value: 0, name: 'Right' }],
+	3: [{ value: 1, name: 'Clockwise' }, { value: 0, name: 'Counter-clockwise' }],
+	12: [{ value: 1, name: 'Up' }, { value: 0, name: 'Down' }],
+	18: [{ value: 1, name: 'Inward' }, { value: 0, name: 'Outward' }]
+}; // mode byte -> its direction choices in display order
 
 /** @brief Decoded info block. */
 export interface Info {
@@ -105,6 +130,7 @@ export interface Lighting {
 	direction: number;
 	colorful: boolean;
 	color: string;
+	preset: number;
 }
 
 /** @brief Command echo, status and payload of one reply. */
@@ -119,11 +145,11 @@ export type LightingField = readonly [offset: number, data: Uint8Array<ArrayBuff
 
 //& Private Variables
 
-//? Which effects show which control, taken from the vendor app's per-mode control visibility; effect 17's preset colours are not mapped yet.
+//? Which effects show which control, taken from the vendor app's per-mode control visibility.
 const SPEED = new Set([1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15]); // effects with a speed slider
-const DIRECTION = new Set([1, 2, 3, 12, 18]); // effects with a direction choice
 const COLOR = new Set([1, 2, 3, 5, 6, 7, 8, 9, 13, 14, 15, 16]); // effects with a colour picker
 const RAINBOW = new Set([1, 2, 3, 5, 7, 8, 9, 13, 14, 15, 16]); // effects with a rainbow switch
+const PRESET = new Set([17]); // effects with the preset colour buttons
 
 //& Public Functions
 
@@ -187,8 +213,8 @@ export function decodeInfo(block: Uint8Array): Info {
 
 /**
  * @brief Decode the lighting block fields the configurator shows.
- * @param[in] block LIGHTING_SIZE bytes from Command.readLighting.
- * @return Mode, levels, direction, rainbow flag and effect colour.
+ * @param[in] block One profile's LIGHTING_RECORD_SIZE bytes from Command.readLighting.
+ * @return Mode, levels, direction, rainbow flag, effect colour and preset colour.
  */
 export function decodeLighting(block: Uint8Array): Lighting {
 	return {
@@ -197,17 +223,18 @@ export function decodeLighting(block: Uint8Array): Lighting {
 		speed: block[2], // speed level
 		direction: block[3], // direction, 0xFF when the mode has none
 		colorful: block[4] !== 0, // rainbow flag
-		color: formatColor(block, LightingOffset.color) // effect colour as CSS hex
+		color: formatColor(block, LightingOffset.color), // effect colour as CSS hex
+		preset: block[LightingOffset.preset] // Surmount colour, an index into PRESETS
 	};
 }
 
 /**
  * @brief Lighting controls an effect uses.
  * @param[in] mode Mode byte.
- * @return Which of speed, direction, colour and rainbow apply; brightness always applies.
+ * @return Which of speed, direction, colour, rainbow and preset colour apply; brightness always applies.
  */
 export function modeControls(mode: number): ModeControls {
-	return { speed: SPEED.has(mode), direction: DIRECTION.has(mode), color: COLOR.has(mode), rainbow: RAINBOW.has(mode) }; // flags per control
+	return { speed: SPEED.has(mode), direction: mode in DIRECTIONS, color: COLOR.has(mode), rainbow: RAINBOW.has(mode), preset: PRESET.has(mode) }; // flags per control
 }
 
 /**

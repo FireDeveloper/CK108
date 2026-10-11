@@ -5,14 +5,11 @@
 	 * @note Rendered only while connected; the root layout shows the connect screen otherwise.
 	 */
 	import { getConnection } from '#lib/ck108/connection.svelte.ts';
+	import ReadingState from '#lib/device/ReadingState.svelte';
 	import RemapEditor from '#lib/remap/RemapEditor.svelte';
 
 	const connection = getConnection(); // shared connection from the layout
 </script>
-
-<svelte:head>
-	<title>Keys - CK108 Configurator</title>
-</svelte:head>
 
 {#if connection.info && connection.keymaps && connection.defaultKeymap && connection.macros}
 	{@const profile = connection.info.profile}
@@ -23,12 +20,5 @@
 		macroNames={connection.macros.map((macro) => macro.name)}
 	/>
 {:else}
-	<p>Reading...</p>
+	<ReadingState />
 {/if}
-
-<style>
-	p {
-		margin: 0;
-		color: var(--text-muted);
-	}
-</style>

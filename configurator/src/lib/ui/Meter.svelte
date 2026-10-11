@@ -19,7 +19,7 @@
 
 <div class="meter">
 	<div class="top">
-		<span>{label}</span>
+		<span class="label">{label}</span>
 		<span class="reading">{reading}</span>
 	</div>
 	<div class={['track', tone]} role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={max} aria-valuenow={value} aria-valuetext={reading}>
@@ -36,24 +36,32 @@
 	.top {
 		display: flex;
 		justify-content: space-between;
-		gap: 12px;
-		font-size: 13px;
+		gap: var(--space-3);
+		font-size: var(--text-sm);
+	}
+
+	.label {
+		font-weight: var(--weight-medium);
 	}
 
 	.reading {
 		color: var(--text-muted);
+		font-variant-numeric: tabular-nums;
 	}
 
 	.track {
 		height: 6px;
-		border-radius: 999px;
-		background: var(--surface-raised);
 		overflow: hidden;
+		border-radius: var(--radius-full);
+		background: var(--surface-inset);
+		box-shadow: inset 0 0 0 1px var(--border);
 	}
 
 	.fill {
 		height: 100%;
-		background: var(--accent);
+		border-radius: inherit;
+		background: var(--text);
+		transition: width var(--duration-base) var(--ease-standard);
 	}
 
 	.warn .fill {

@@ -1,14 +1,15 @@
 <script lang="ts">
 	/**
 	 * @file RemapEditor.svelte
-	 * @brief Key remap editor: switch the active profile, pick a key on a drawing of the keyboard, choose what it sends, and write the profile's key map.
-	 * @note Keys that differ from the factory key map are highlighted and show their new function.
+	 * @brief Key remap editor: pick a key on a drawing of the keyboard, choose what it sends, and write the active profile's key map.
+	 * @note Keys that differ from the factory key map carry a dot and show their new function.
+	 * @note The profile switch lives in the app frame; the form follows the picked key into whichever profile the keyboard switched to.
 	 */
-	import { RotateCcw } from '@lucide/svelte';
+	import { MousePointerClick, RotateCcw } from '@lucide/svelte';
+	import { untrack } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { getConnection } from '#lib/ck108/connection.svelte.ts';
 	import {
-		PROFILES,
 		SHORTCUTS,
 		decodeAction,
 		describeAction,
@@ -25,7 +26,12 @@
 	import Button from '#lib/ui/Button.svelte';
 	import Card from '#lib/ui/Card.svelte';
 	import Checkbox from '#lib/ui/Checkbox.svelte';
+	import ConfirmDialog from '#lib/ui/ConfirmDialog.svelte';
+	import EmptyState from '#lib/ui/EmptyState.svelte';
+	import FieldGroup from '#lib/ui/FieldGroup.svelte';
+	import Hint from '#lib/ui/Hint.svelte';
 	import KeyMap from '#lib/ui/KeyMap.svelte';
+	import KeyValueList from '#lib/ui/KeyValueList.svelte';
 	import SegmentedControl from '#lib/ui/SegmentedControl.svelte';
 	import SelectMenu from '#lib/ui/SelectMenu.svelte';
 
@@ -49,7 +55,6 @@
 	const KEY_OPTIONS = KEYBOARD_USAGES.map(({ usage, name, group }) => ({ value: usage, label: name, group })); // key picker entries
 	const MEDIA_OPTIONS = MEDIA_USAGES.map(({ usage, name, group }) => ({ value: usage, label: name, group })); // media picker entries
 	const SHORTCUT_OPTIONS = SHORTCUTS.map((name, index) => ({ value: index, label: name })); // built-in shortcut picker entries
-	const PROFILE_OPTIONS = Array.from({ length: PROFILES }, (_, index) => ({ value: index, label: `Profile ${index + 1}` })); // profile choices
 
 	const connection = getConnection(); // shared connection from the layout
 	let slot = $state<number | null>(null); // matrix slot of the picked key
@@ -59,7 +64,7 @@
 	let mediaUsage = $state<number | null>(null); // composed media usage
 	let shortcutIndex = $state<number | null>(null); // composed built-in shortcut
 	let macroIndex = $state<number | null>(null); // composed macro index
-	let switching = $state(false); // profile switch in flight
+	let confirmingReset = $state(false); // Reset every key awaits confirmation
 
 	const macroName = (index: number) => macroNames[index] ?? `#${index + 1} (missing)`; // macro name by index
 	const picked = $derived(KEYS.find((key) => key.slot === slot) ?? null); // physical key being edited
@@ -73,10 +78,25 @@
 	const mapKeys = $derived(
 		KEYS.map((key) => {
 			const marked = !sameEntry(keymap, defaults, key.slot); // remapped key
-			return { ...key, id: key.slot, marked, label: marked ? keycapText(decodeAction(keymap, key.slot)) : key.label }; // drawn key
+			const action = decodeAction(keymap, key.slot); // what the key sends now
+			return {
+				...key,
+				id: key.slot,
+				marked,
+				label: marked ? keycapText(action) : key.label,
+				detail: marked ? `sends ${describeAction(action, macroName)}` : undefined
+			}; // drawn key
 		})
 	); // keys with their current function
-	const macroOptions = $derived(macroNames.map((name, index) => ({ value: index, label: `${index + 1}. ${name}` }))); // macro picker entries
+	const macroOptions = $derived(macroNames.map((name, index) => ({ value: index, label: `M${index + 1} ${name}` }))); // macro picker entries
+
+	//? The profile switch lives outside this editor; when the keyboard changes profile, the form reloads the picked key from the new profile's map.
+	$effect(() => {
+		void profile; // re-run when the active profile changes
+		untrack(() => {
+			if (slot !== null) load(decodeAction(keymap, slot)); // what the picked key does in that profile
+		});
+	});
 
 	/**
 	 * @brief Pick a key and load its current action into the form.
@@ -142,158 +162,129 @@
 		void connection.applyKeymap(profile, withAction(keymap, slot, action)); // show, write, read back
 	}
 
-	/**
-	 * @brief Switch the keyboard to another profile, then reload the picked key's form from that profile's key map.
-	 * @param[in] next 0..PROFILES-1.
-	 */
-	async function switchProfile(next: number): Promise<void> {
-		switching = true; // block a second switch
-		try {
-			await connection.setProfile(next); // switch and read back
-		} finally {
-			switching = false; // ready again
-		}
-		if (slot !== null) load(decodeAction(keymap, slot)); // form follows the picked key in the profile now in use
-	}
-
-	/** @brief Put every key of this profile back to its factory action. */
+	/** @brief Put every key of this profile back to its factory action; called once the user confirms. */
 	function resetAll(): void {
+		confirmingReset = false; // confirmation used
 		void connection.applyKeymap(profile, defaults.slice()); // factory map
 		if (slot !== null) load(decodeAction(defaults, slot)); // form follows the picked key
 	}
 </script>
 
-<Card title="Keys of profile {profile + 1}">
+<Card title="Pick a key" description="Keys with a dot differ from the factory layout and show their new function.">
 	{#snippet actions()}
-		<Button variant="ghost" disabled={changedCount === 0} onclick={resetAll}>
-			<RotateCcw size={16} aria-hidden="true" />
+		<Button variant="ghost" size="sm" disabled={changedCount === 0} onclick={() => (confirmingReset = true)}>
+			<RotateCcw aria-hidden="true" />
 			Reset every key
 		</Button>
 	{/snippet}
 
-	<div class="profile">
-		<SegmentedControl label="Active profile" options={PROFILE_OPTIONS} value={profile} disabled={switching} onchange={(value) => void switchProfile(value)} />
-	</div>
 	<KeyMap label="Keyboard keys" keys={mapKeys} selected={new Set(slot === null ? [] : [slot])} multiple={false} onselect={pick} />
-	<p class="hint">
-		Pick a key to change what it sends. Highlighted keys differ from the factory layout and show their new function. Switching profile changes
-		the keys the keyboard uses at once; lighting and key colours are shared by every profile.
-	</p>
+	<Hint>
+		{changedCount === 0
+			? `Every key in profile ${profile + 1} sends its factory function.`
+			: `${changedCount} ${changedCount === 1 ? 'key differs' : 'keys differ'} from the factory layout in profile ${profile + 1}.`}
+	</Hint>
 </Card>
 
-<Card title={picked ? `${keyTitle} key` : 'Key'}>
+{#snippet inspectorFooter()}
+	{#if current && factory}
+		<Button disabled={!isChanged} onclick={() => assign(factory)}>
+			<RotateCcw aria-hidden="true" />
+			Reset to factory
+		</Button>
+		<Button variant="primary" disabled={!draft || !isDraftNew} onclick={() => draft && assign(draft)}>Assign to {keyTitle}</Button>
+	{/if}
+{/snippet}
+
+<Card title={picked ? `${keyTitle} key` : 'Key'} footer={picked ? inspectorFooter : undefined}>
 	{#if !picked || !current || !factory}
-		<p class="hint">No key picked yet.</p>
+		<EmptyState title="No key picked" icon={MousePointerClick}>Pick a key on the keyboard above to see what it sends.</EmptyState>
 	{:else}
-		<dl>
-			<dt>Sends now</dt>
-			<dd>{describeAction(current, macroName)}{isChanged ? '' : ' (factory)'}</dd>
-			<dt>Factory</dt>
-			<dd>{describeAction(factory, macroName)}</dd>
-		</dl>
-
-		{#if current.kind === 'fn'}
-			<Alert tone="warn" title="This is the Fn key">
-				It switches the keyboard's second layer, which holds the media and lighting shortcuts. Remapping it turns those off until you reset
-				this key.
-			</Alert>
-		{/if}
-
-		<div class="form">
-			<SegmentedControl label="Sends" options={KINDS} value={kind === 'fn' || kind === 'other' ? null : kind} onchange={(value) => (kind = value)} />
-
-			{#if kind === 'key'}
-				<SelectMenu label="Key" options={KEY_OPTIONS} value={keyUsage} onchange={(value) => (keyUsage = value)} />
-			{:else if kind === 'modifiers'}
-				<fieldset class="modifiers">
-					<legend>Modifiers, held while the key is down</legend>
-					{#each MODIFIERS as modifier (modifier.bit)}
-						<Checkbox label={modifier.name} checked={(mask & modifier.bit) !== 0} onchange={(on) => setModifier(modifier.bit, on)} />
-					{/each}
-				</fieldset>
-			{:else if kind === 'media'}
-				<SelectMenu label="Media key" options={MEDIA_OPTIONS} value={mediaUsage} onchange={(value) => (mediaUsage = value)} />
-			{:else if kind === 'shortcut'}
-				<SelectMenu label="Shortcut" options={SHORTCUT_OPTIONS} value={shortcutIndex} onchange={(value) => (shortcutIndex = value)} />
-				<p class="hint">The keyboard sends these itself. For any other key combination, record a macro.</p>
-			{:else if kind === 'macro'}
-				{#if macroOptions.length > 0}
-					<SelectMenu label="Macro" options={macroOptions} value={macroIndex} onchange={(value) => (macroIndex = value)} />
-				{:else}
-					<p class="hint">No macros stored yet. Record one under <a href={resolve('/macros')}>Macros</a>.</p>
+		<div class="inspector">
+			<div class="summary">
+				<KeyValueList
+					items={[
+						{ term: 'Sends now', detail: `${describeAction(current, macroName)}${isChanged ? '' : ' (factory)'}` },
+						{ term: 'Factory', detail: describeAction(factory, macroName) }
+					]}
+				/>
+				{#if current.kind === 'fn'}
+					<Alert tone="warn" title="This is the Fn key">
+						It switches the keyboard's second layer, which holds the media and lighting shortcuts. Remapping it turns those off until you reset this
+						key.
+					</Alert>
 				{/if}
-			{:else if kind === 'disabled'}
-				<p class="hint">The key will send nothing.</p>
-			{/if}
-		</div>
+			</div>
 
-		<div class="actions">
-			<Button variant="primary" disabled={!draft || !isDraftNew} onclick={() => draft && assign(draft)}>Assign to {keyTitle}</Button>
-			<Button disabled={!isChanged} onclick={() => assign(factory)}>
-				<RotateCcw size={16} aria-hidden="true" />
-				Reset to factory
-			</Button>
+			<div class="form">
+				<SegmentedControl label="Sends" options={KINDS} value={kind === 'fn' || kind === 'other' ? null : kind} fill onchange={(value) => (kind = value)} />
+
+				{#if kind === 'key'}
+					<SelectMenu label="Key" options={KEY_OPTIONS} value={keyUsage} onchange={(value) => (keyUsage = value)} />
+				{:else if kind === 'modifiers'}
+					<FieldGroup label="Modifiers, held while the key is down" layout="grid">
+						{#each MODIFIERS as modifier (modifier.bit)}
+							<Checkbox label={modifier.name} checked={(mask & modifier.bit) !== 0} onchange={(on) => setModifier(modifier.bit, on)} />
+						{/each}
+					</FieldGroup>
+				{:else if kind === 'media'}
+					<SelectMenu label="Media key" options={MEDIA_OPTIONS} value={mediaUsage} onchange={(value) => (mediaUsage = value)} />
+				{:else if kind === 'shortcut'}
+					<SelectMenu
+						label="Shortcut"
+						options={SHORTCUT_OPTIONS}
+						value={shortcutIndex}
+						description="The keyboard sends these itself. For any other key combination, record a macro."
+						onchange={(value) => (shortcutIndex = value)}
+					/>
+				{:else if kind === 'macro'}
+					{#if macroOptions.length > 0}
+						<SelectMenu label="Macro" options={macroOptions} value={macroIndex} onchange={(value) => (macroIndex = value)} />
+					{:else}
+						<Hint>No macros stored yet. Record one under <a href={resolve('/macros')}>Macros</a>.</Hint>
+					{/if}
+				{:else if kind === 'disabled'}
+					<Hint>The key will send nothing.</Hint>
+				{/if}
+			</div>
 		</div>
 	{/if}
 </Card>
 
+<ConfirmDialog
+	open={confirmingReset}
+	title="Reset every key in profile {profile + 1}?"
+	confirmLabel="Reset keys"
+	onconfirm={resetAll}
+	oncancel={() => (confirmingReset = false)}
+>
+	<p>
+		{changedCount === 1 ? 'The remapped key goes' : `${changedCount} remapped keys go`} back to their factory function, and the key map is written to the
+		keyboard.
+	</p>
+</ConfirmDialog>
+
 <style>
-	dl {
+	.inspector {
 		display: grid;
-		grid-template-columns: max-content 1fr;
-		gap: 6px 20px;
-		margin: 0 0 16px;
+		align-items: start;
+		gap: var(--space-6);
 	}
 
-	dt {
-		color: var(--text-muted);
-	}
-
-	dd {
-		margin: 0;
-		font-weight: 600;
-	}
-
-	.profile {
-		max-width: 520px;
-		margin-bottom: 16px;
-	}
-
+	.summary,
 	.form {
 		display: grid;
-		gap: 16px;
-		max-width: 520px;
-		margin-top: 16px;
+		gap: var(--space-4);
 	}
 
-	.modifiers {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-		gap: 8px 16px;
-		margin: 0;
-		padding: 0;
-		border: 0;
-	}
+	@container content (min-width: 52rem) {
+		.inspector {
+			grid-template-columns: minmax(0, 32rem) minmax(0, 18rem);
+			justify-content: space-between;
+		}
 
-	.modifiers legend {
-		margin-bottom: 8px;
-		padding: 0;
-	}
-
-	.actions {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px;
-		margin-top: 20px;
-	}
-
-	.hint {
-		margin: 12px 0 0;
-		font-size: 13px;
-		color: var(--text-muted);
-	}
-
-	.hint a {
-		color: var(--accent);
+		.summary {
+			order: 1;
+		}
 	}
 </style>

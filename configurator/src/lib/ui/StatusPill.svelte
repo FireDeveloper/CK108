@@ -1,18 +1,25 @@
 <script lang="ts">
 	/**
 	 * @file StatusPill.svelte
-	 * @brief Shared status badge: a coloured dot and a short label.
+	 * @brief Shared status badge: a tone dot, or a spinner while busy, beside a short label; screen readers hear each change.
 	 */
+	import Spinner from './Spinner.svelte';
+
 	interface Props {
 		tone?: 'neutral' | 'ok' | 'warn' | 'danger';
 		label: string;
+		busy?: boolean;
 	}
 
-	let { tone = 'neutral', label }: Props = $props(); // colour and text
+	let { tone = 'neutral', label, busy = false }: Props = $props(); // dot colour, text, activity
 </script>
 
-<span class={['pill', tone]}>
-	<span class="dot" aria-hidden="true"></span>
+<span class={['pill', tone]} role="status">
+	{#if busy}
+		<Spinner size={12} />
+	{:else}
+		<span class="dot" aria-hidden="true"></span>
+	{/if}
 	{label}
 </span>
 
@@ -21,38 +28,38 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
-		padding: 2px 10px;
-		border-radius: 999px;
-		font-size: 13px;
-		font-weight: 600;
+		height: 22px;
+		padding: 0 8px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-full);
+		background: var(--fill-subtle);
+		color: var(--text-muted);
+		font-size: var(--text-xs);
+		font-weight: var(--weight-medium);
 		white-space: nowrap;
 		user-select: none;
 	}
 
 	.dot {
-		width: 7px;
-		height: 7px;
-		border-radius: 50%;
-		background: currentColor;
+		width: 6px;
+		height: 6px;
+		border-radius: var(--radius-full);
+		background: var(--text-subtle);
 	}
 
-	.neutral {
-		background: var(--neutral-soft);
-		color: var(--text-muted);
+	.ok .dot {
+		background: var(--ok);
 	}
 
-	.ok {
-		background: var(--ok-soft);
-		color: var(--ok);
-	}
-
-	.warn {
-		background: var(--warn-soft);
-		color: var(--warn);
+	.warn .dot {
+		background: var(--warn);
 	}
 
 	.danger {
-		background: var(--danger-soft);
 		color: var(--danger);
+	}
+
+	.danger .dot {
+		background: var(--danger);
 	}
 </style>
